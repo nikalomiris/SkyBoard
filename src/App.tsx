@@ -1,23 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import {
     ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
     Circle, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
-    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, MoreHorizontal, MoveRight,
+    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     StickyNote, Trash2, Type, Users, X,
 } from 'lucide-react'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
-type BoardItem =
-    | { id: string; type: 'stroke'; points: string; color: string; width: number; opacity: number }
-    | { id: string; type: 'text'; left: number; top: number; text: string; color: string; size: number }
-    | { id: string; type: 'note'; left: number; top: number; text: string }
-    | { id: string; type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string }
-    | { id: string; type: 'grid'; left: number; top: number; values: string[] }
-    | { id: string; type: 'image'; left: number; top: number; src: string; label: string }
-    | { id: string; type: 'pdf'; left: number; top: number; src: string; label: string }
+type BoardItem = { id: string; scale?: number } & (
+    | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
+    | { type: 'text'; left: number; top: number; text: string; color: string; size: number }
+    | { type: 'note'; left: number; top: number; text: string }
+    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string }
+    | { type: 'grid'; left: number; top: number; values: string[] }
+    | { type: 'image'; left: number; top: number; src: string; label: string }
+    | { type: 'pdf'; left: number; top: number; src: string; label: string }
+)
 type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; kind: 'lesson' }
+type Point = [number, number]
+type ItemBounds = { left: number; top: number; width: number; height: number }
+type ItemGesture = { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
 
 type PageItems = Record<string, BoardItem[]>
 
@@ -46,6 +50,45 @@ const palette = ['#253c37', '#ee7859', '#387c70', '#576fc2', '#e5ac37', '#bc6c9a
 
 function id() {
     return Math.random().toString(36).slice(2, 10)
+}
+
+function parsePoints(points: string): Point[] {
+    return points.trim().split(/\s+/).filter(Boolean).map((point) => point.split(',').map(Number) as Point)
+}
+
+function pointToSegmentDistance(point: Point, start: Point, end: Point) {
+    const deltaX = end[0] - start[0]
+    const deltaY = end[1] - start[1]
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY
+    if (!lengthSquared) return Math.hypot(point[0] - start[0], point[1] - start[1])
+    const ratio = Math.max(0, Math.min(1, ((point[0] - start[0]) * deltaX + (point[1] - start[1]) * deltaY) / lengthSquared))
+    return Math.hypot(point[0] - (start[0] + ratio * deltaX), point[1] - (start[1] + ratio * deltaY))
+}
+
+function segmentDistance(firstStart: Point, firstEnd: Point, secondStart: Point, secondEnd: Point) {
+    const orientation = (start: Point, end: Point, point: Point) => (end[0] - start[0]) * (point[1] - start[1]) - (end[1] - start[1]) * (point[0] - start[0])
+    const firstSideA = orientation(firstStart, firstEnd, secondStart)
+    const firstSideB = orientation(firstStart, firstEnd, secondEnd)
+    const secondSideA = orientation(secondStart, secondEnd, firstStart)
+    const secondSideB = orientation(secondStart, secondEnd, firstEnd)
+    const onSegment = (start: Point, end: Point, point: Point) => point[0] >= Math.min(start[0], end[0]) && point[0] <= Math.max(start[0], end[0]) && point[1] >= Math.min(start[1], end[1]) && point[1] <= Math.max(start[1], end[1])
+    if (firstSideA === 0 && onSegment(firstStart, firstEnd, secondStart) ||
+        firstSideB === 0 && onSegment(firstStart, firstEnd, secondEnd) ||
+        secondSideA === 0 && onSegment(secondStart, secondEnd, firstStart) ||
+        secondSideB === 0 && onSegment(secondStart, secondEnd, firstEnd) ||
+        (firstSideA < 0) !== (firstSideB < 0) && (secondSideA < 0) !== (secondSideB < 0)) return 0
+    return Math.min(
+        pointToSegmentDistance(firstStart, secondStart, secondEnd),
+        pointToSegmentDistance(firstEnd, secondStart, secondEnd),
+        pointToSegmentDistance(secondStart, firstStart, firstEnd),
+        pointToSegmentDistance(secondEnd, firstStart, firstEnd),
+    )
+}
+
+function polylinesWithinDistance(first: Point[], second: Point[], distance: number) {
+    const firstSegments = first.length === 1 ? [[first[0], first[0]]] : first.slice(1).map((point, index) => [first[index], point])
+    const secondSegments = second.length === 1 ? [[second[0], second[0]]] : second.slice(1).map((point, index) => [second[index], point])
+    return firstSegments.some(([firstStart, firstEnd]) => secondSegments.some(([secondStart, secondEnd]) => segmentDistance(firstStart, firstEnd, secondStart, secondEnd) <= distance))
 }
 
 function readStored<T>(key: string, fallback: T): T {
@@ -91,6 +134,7 @@ function App() {
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => readStored('skyboard:items', {}))
     const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
+    const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [ink, setInk] = useState(palette[0])
     const [background, setBackground] = useState('#fffef9')
     const [showBackgrounds, setShowBackgrounds] = useState(false)
@@ -102,6 +146,7 @@ function App() {
     const [showFileMenu, setShowFileMenu] = useState<string | null>(null)
     const [isFollowing, setIsFollowing] = useState(false)
     const [draggingId, setDraggingId] = useState<string | null>(null)
+    const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null)
     const [folderMenu, setFolderMenu] = useState<string | null>(null)
     const [printing, setPrinting] = useState(false)
     const [toast, setToast] = useState('')
@@ -109,11 +154,13 @@ function App() {
     const [currentPoints, setCurrentPoints] = useState('')
     const [showToolOptions, setShowToolOptions] = useState(false)
     const stageRef = useRef<HTMLDivElement>(null)
+    const itemGestureRef = useRef<ItemGesture | null>(null)
     const imageInputRef = useRef<HTMLInputElement>(null)
     const backgroundInputRef = useRef<HTMLInputElement>(null)
 
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
+    const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
     const visibleLessons = lessons.filter((lesson) => {
         const matchesFolder = activeFolder === 'All lessons' || activeFolder === 'Shared with me' || lesson.folder === activeFolder
         return matchesFolder && lesson.title.toLowerCase().includes(search.toLowerCase())
@@ -122,6 +169,10 @@ function App() {
     useEffect(() => { window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
     useEffect(() => { window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
     useEffect(() => { window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
+    useLayoutEffect(() => {
+        setSelectedItemId(null)
+        itemGestureRef.current = null
+    }, [currentPageKey])
     useEffect(() => {
         if (!openLesson) return
         const pageKey = 'skyboard:active-page'
@@ -163,6 +214,20 @@ function App() {
         }
     }, [openLesson, pageIndex, pages.length, studentView])
 
+    useEffect(() => {
+        if (studentView) return
+        const deleteSelected = (event: KeyboardEvent) => {
+            if (event.key !== 'Backspace' && event.key !== 'Delete') return
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+            if (!selectedItemId) return
+            event.preventDefault()
+            updateCurrentItems((items) => items.filter((item) => item.id !== selectedItemId))
+            setSelectedItemId(null)
+        }
+        window.addEventListener('keydown', deleteSelected)
+        return () => window.removeEventListener('keydown', deleteSelected)
+    }, [selectedItemId, currentPageKey, studentView])
+
     function notify(message: string) {
         setToast(message)
         window.setTimeout(() => setToast(''), 2400)
@@ -173,6 +238,74 @@ function App() {
             ...previous,
             [currentPageKey]: typeof nextItems === 'function' ? nextItems(previous[currentPageKey] ?? []) : nextItems,
         }))
+    }
+
+    function getItemBounds(item: BoardItem): ItemBounds {
+        const scale = item.scale ?? 1
+        if (item.type === 'stroke') {
+            const points = parsePoints(item.points)
+            const xs = points.map(([pointX]) => pointX)
+            const ys = points.map(([, pointY]) => pointY)
+            const left = Math.min(...xs)
+            const top = Math.min(...ys)
+            return { left, top, width: Math.max(1, Math.max(...xs) - left), height: Math.max(1, Math.max(...ys) - top) }
+        }
+        const left = item.left * 10
+        const top = item.top * 6.2
+        if (item.type === 'shape' && item.shape === 'circle') return { left: left - 46 * scale, top: top - 46 * scale, width: 92 * scale, height: 92 * scale }
+        if (item.type === 'shape') return { left: left - (item.shape === 'line' ? 48 : 0) * scale, top: top - 5 * scale, width: (item.shape === 'line' ? 96 : 125) * scale, height: (item.shape === 'line' ? 10 : 78) * scale }
+        if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
+        const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
+        const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
+        return { left, top, width: width * scale, height: height * scale }
+    }
+
+    function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): BoardItem {
+        if (item.type === 'stroke') return { ...item, points: parsePoints(item.points).map(([pointX, pointY]) => `${pointX + deltaX},${pointY + deltaY}`).join(' ') }
+        return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2 }
+    }
+
+    function resizeBoardItem(item: BoardItem, factor: number): BoardItem {
+        const scale = Math.max(0.35, Math.min(3, (item.scale ?? 1) * factor))
+        if (item.type !== 'stroke') return { ...item, scale }
+        const bounds = getItemBounds(item)
+        return {
+            ...item,
+            points: parsePoints(item.points).map(([pointX, pointY]) => `${bounds.left + (pointX - bounds.left) * factor},${bounds.top + (pointY - bounds.top) * factor}`).join(' '),
+        }
+    }
+
+    function addBoardItem(item: BoardItem) {
+        updateCurrentItems((items) => [...items, item])
+        setSelectedItemId(item.id)
+        setActiveTool('select')
+        setShowToolOptions(false)
+    }
+
+    function reorderPage(fromIndex: number, toIndex: number) {
+        if (!openLesson || fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return
+        const nextPages = [...pages]
+        const [movedPage] = nextPages.splice(fromIndex, 1)
+        nextPages.splice(toIndex, 0, movedPage)
+        const nextPageIndex = pageIndex === fromIndex ? toIndex :
+            fromIndex < pageIndex && toIndex >= pageIndex ? pageIndex - 1 :
+                fromIndex > pageIndex && toIndex <= pageIndex ? pageIndex + 1 : pageIndex
+        setItemsByPage((previous) => {
+            const reordered = { ...previous }
+            pages.forEach((_, oldIndex) => {
+                const oldKey = `${openLesson.id}:${oldIndex}`
+                const newIndex = oldIndex === fromIndex ? toIndex :
+                    fromIndex < toIndex && oldIndex > fromIndex && oldIndex <= toIndex ? oldIndex - 1 :
+                        fromIndex > toIndex && oldIndex >= toIndex && oldIndex < fromIndex ? oldIndex + 1 : oldIndex
+                const newKey = `${openLesson.id}:${newIndex}`
+                if (previous[oldKey]) reordered[newKey] = previous[oldKey]
+                else delete reordered[newKey]
+            })
+            return reordered
+        })
+        updateLessonPages(nextPages)
+        setPageIndex(nextPageIndex)
+        setSelectedItemId(null)
     }
 
     function createLesson() {
@@ -274,9 +407,40 @@ function App() {
         notify('Page deleted')
     }
 
-    function coordinates(event: ReactPointerEvent<HTMLElement>) {
+    function coordinates(event: { clientX: number; clientY: number }) {
         const rect = stageRef.current!.getBoundingClientRect()
         return { stageX: ((event.clientX - rect.left) / rect.width) * 1000, stageY: ((event.clientY - rect.top) / rect.height) * 620 }
+    }
+
+    function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: ItemGesture['mode'] = 'move') {
+        if (studentView || activeTool !== 'select') return
+        setSelectedItemId(item.id)
+        event.stopPropagation()
+        if (event.target instanceof HTMLInputElement) {
+            return
+        }
+        const { stageX, stageY } = coordinates(event)
+        itemGestureRef.current = { mode, item, startX: stageX, startY: stageY, bounds: getItemBounds(item) }
+        stageRef.current?.setPointerCapture(event.pointerId)
+    }
+
+    function resizeFromHandle(event: ReactPointerEvent<SVGCircleElement>) {
+        if (!selectedItem) return
+        event.stopPropagation()
+        const { stageX, stageY } = coordinates(event)
+        itemGestureRef.current = { mode: 'resize', item: selectedItem, startX: stageX, startY: stageY, bounds: getItemBounds(selectedItem) }
+        stageRef.current?.setPointerCapture(event.pointerId)
+    }
+
+    function scaleSelectedItem(factor: number) {
+        if (!selectedItem) return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id ? resizeBoardItem(item, factor) : item))
+    }
+
+    function deleteSelectedItem() {
+        if (!selectedItemId) return
+        updateCurrentItems((items) => items.filter((item) => item.id !== selectedItemId))
+        setSelectedItemId(null)
     }
 
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
@@ -301,23 +465,26 @@ function App() {
         }
         if (activeTool === 'postit') {
             const text = window.prompt('Add a note', 'Remember this sound!')
-            if (text) updateCurrentItems((items) => [...items, { id: id(), type: 'note', left: stageX / 10, top: stageY / 6.2, text }])
+            if (text) addBoardItem({ id: id(), type: 'note', left: stageX / 10, top: stageY / 6.2, text })
             return
         }
         if (activeTool === 'text') {
             const text = window.prompt('Add text')
-            if (text) updateCurrentItems((items) => [...items, { id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text, color: ink, size: 22 }])
+            if (text) addBoardItem({ id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text, color: ink, size: 22 })
             return
         }
         if (activeTool === 'grid') {
-            updateCurrentItems((items) => [...items, { id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill('') }])
+            addBoardItem({ id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill('') })
             return
         }
         if (activeTool === 'shape') {
-            updateCurrentItems((items) => [...items, { id: id(), type: 'shape', left: stageX / 10, top: stageY / 6.2, shape: selectedShape, color: ink }])
+            addBoardItem({ id: id(), type: 'shape', left: stageX / 10, top: stageY / 6.2, shape: selectedShape, color: ink })
             return
         }
-        if (activeTool === 'select') return
+        if (activeTool === 'select') {
+            setSelectedItemId(null)
+            return
+        }
         if (activeTool === 'laser') {
             setCurrentPoints(`${stageX},${stageY}`)
             return
@@ -328,27 +495,36 @@ function App() {
     }
 
     function onStageMove(event: ReactPointerEvent<HTMLElement>) {
-        if (!drawing || !stageRef.current) return
+        if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
+        const gesture = itemGestureRef.current
+        if (gesture) {
+            const deltaX = stageX - gesture.startX
+            const deltaY = stageY - gesture.startY
+            let updatedItem: BoardItem
+            if (gesture.mode === 'move') updatedItem = moveBoardItem(gesture.item, deltaX, deltaY)
+            else {
+                const dimension = Math.max(1, gesture.bounds.width + gesture.bounds.height)
+                const factor = Math.max(0.35, Math.min(3, 1 + (deltaX + deltaY) / dimension))
+                updatedItem = resizeBoardItem(gesture.item, factor)
+            }
+            updateCurrentItems((items) => items.map((item) => item.id === gesture.item.id ? updatedItem : item))
+            return
+        }
+        if (!drawing) return
         setCurrentPoints((points) => `${points} ${stageX},${stageY}`)
     }
 
     function onStageUp() {
+        if (itemGestureRef.current) {
+            itemGestureRef.current = null
+            return
+        }
         if (drawing && currentPoints && activeTool === 'eraser') {
-            const eraserPoints = currentPoints.trim().split(/\s+/).map((point) => point.split(',').map(Number))
-            updateCurrentItems((items) => items.flatMap<BoardItem>((item) => {
-                if (item.type !== 'stroke') return [item]
-                const segments: number[][][] = []
-                let segment: number[][] = []
-                for (const point of item.points.trim().split(/\s+/).map((value) => value.split(',').map(Number))) {
-                    const erased = eraserPoints.some(([eraseX, eraseY]) => Math.hypot(point[0] - eraseX, point[1] - eraseY) < 24 + item.width / 2)
-                    if (erased) {
-                        if (segment.length > 1) segments.push(segment)
-                        segment = []
-                    } else segment.push(point)
-                }
-                if (segment.length > 1) segments.push(segment)
-                return segments.map<BoardItem>((points, index) => ({ ...item, id: index === 0 ? item.id : id(), points: points.map((point) => point.join(',')).join(' ') }))
+            const eraserPoints = parsePoints(currentPoints)
+            updateCurrentItems((items) => items.filter((item) => {
+                if (item.type !== 'stroke') return true
+                return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, 22 + item.width / 2)
             }))
         } else if (drawing && currentPoints && activeTool !== 'eraser') {
             const style = activeTool === 'highlighter' ? { color: '#f1cd63', width: 24, opacity: 0.42 } :
@@ -366,9 +542,9 @@ function App() {
         if (!file) return
         const placeFile = (src?: string) => {
             if (file.type === 'application/pdf') {
-                if (src) updateCurrentItems((items) => [...items, { id: id(), type: 'pdf', left: 14, top: 27, src, label: file.name }])
+                if (src) addBoardItem({ id: id(), type: 'pdf', left: 14, top: 27, src, label: file.name })
             } else if (src) {
-                updateCurrentItems((items) => [...items, { id: id(), type: 'image', left: 12, top: 25, src, label: file.name }])
+                addBoardItem({ id: id(), type: 'image', left: 12, top: 25, src, label: file.name })
             }
             event.target.value = ''
         }
@@ -412,23 +588,24 @@ function App() {
     }
 
     function renderBoardItem(item: BoardItem): ReactNode {
-        if (item.type === 'stroke') return <polyline key={item.id} points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
-        if (item.type === 'text') return <text key={item.id} x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size} fontFamily="Century Gothic, sans-serif">{item.text}</text>
-        if (item.type === 'note') return <foreignObject key={item.id} x={item.left * 10} y={item.top * 6.2} width="190" height="170"><div className="board-sticky">{item.text}</div></foreignObject>
+        const scale = item.scale ?? 1
+        if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
+        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="Century Gothic, sans-serif">{item.text}</text>
+        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky">{item.text}</div></foreignObject>
         if (item.type === 'shape') {
-            if (item.shape === 'circle') return <circle key={item.id} cx={item.left * 10} cy={item.top * 6.2} r="46" fill="none" stroke={item.color} strokeWidth="4" />
-            if (item.shape === 'rectangle') return <rect key={item.id} x={item.left * 10} y={item.top * 6.2} width="125" height="78" rx="8" fill="none" stroke={item.color} strokeWidth="4" />
-            return <line key={item.id} x1={item.left * 10 - 48} y1={item.top * 6.2} x2={item.left * 10 + 48} y2={item.top * 6.2} stroke={item.color} strokeWidth="4" />
+            if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
+            if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" />
+            return <line x1={item.left * 10 - 48 * scale} y1={item.top * 6.2} x2={item.left * 10 + 48 * scale} y2={item.top * 6.2} stroke={item.color} strokeWidth="4" />
         }
         if (item.type === 'grid') return (
-            <foreignObject key={item.id} x={item.left * 10} y={item.top * 6.2} width="294" height="184">
+            <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
                 <div className="board-grid" data-grid-id={item.id}>
                     {item.values.map((value, index) => <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id)} />)}
                 </div>
             </foreignObject>
         )
-        if (item.type === 'image') return <foreignObject key={item.id} x={item.left * 10} y={item.top * 6.2} width="230" height="180"><img className="board-image" src={item.src} alt={item.label} /></foreignObject>
-        return <foreignObject key={item.id} x={item.left * 10} y={item.top * 6.2} width="300" height="220"><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} /></foreignObject>
+        return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
     return (
@@ -496,17 +673,19 @@ function App() {
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setBackground(color)} aria-label={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /></div>}
                             {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div><div className="blend-track"><button className="blend-token consonant">sh</button><span className="blend-dot" /><button className="blend-token vowel">i</button><span className="blend-dot" /><button className="blend-token consonant">p</button></div><div className="blend-word"><span>sh</span><span>i</span><span>p</span><b>ship</b></div><div className="blend-controls"><button onClick={() => notify('Sound playback is ready for your student')}>▶ Play sounds</button><button onClick={() => notify('New sound row added')}>+ New row</button></div></div>}
+                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span><button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map(renderBoardItem)}
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => beginItemGesture(event, item)}>{renderBoardItem(item)}</g>)}
+                                        {selectedItem && (() => { const bounds = getItemBounds(selectedItem); return <g className="selection-frame"><rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="#56866c" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" /><rect className="selection-move-handle" x={bounds.left + bounds.width / 2 - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} /><circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} /></g> })()}
                                         {currentPoints && (drawing || activeTool === 'laser') && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : activeTool === 'highlighter' ? '#f1cd63' : activeTool === 'eraser' ? background : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : activeTool === 'eraser' ? 28 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                     </svg>
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} onClick={() => setPageIndex(index)}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
+                            <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
                         </div>
                     </main>
                 </div>

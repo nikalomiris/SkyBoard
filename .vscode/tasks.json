@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "SkyBoard: Git review",
+			"type": "shell",
+			"command": "git status --short --branch && git diff --stat && git diff --cached --stat",
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "SkyBoard: commit board progress",
+			"type": "shell",
+			"command": "git add -- src/App.tsx src/style.css && git diff --cached --stat && git commit -m \"Fix board interactions and viewport scaling\"",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

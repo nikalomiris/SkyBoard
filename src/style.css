@@ -24,7 +24,12 @@
 body {
     margin: 0;
     min-width: 320px;
-    min-height: 100vh;
+    height: 100%;
+}
+
+html,
+#root {
+    height: 100%;
 }
 
 button,
@@ -44,9 +49,12 @@ input:focus-visible {
 }
 
 .app-shell {
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
 }
 
 .topbar {
@@ -218,7 +226,9 @@ input:focus-visible {
 }
 
 .library-layout {
-    min-height: calc(100vh - 64px);
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
     display: grid;
     grid-template-columns: 236px minmax(0, 1fr);
 }
@@ -461,11 +471,14 @@ input:focus-visible {
 
 .library-main {
     min-width: 0;
+    min-height: 0;
     width: min(1120px, 100%);
     margin: 0 auto;
     padding: 48px 54px 20px;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .library-heading-row {
@@ -626,6 +639,80 @@ kbd {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 17px;
     align-content: start;
+}
+
+@media (max-height: 740px) and (min-width: 721px) {
+    .library-main {
+        padding: 18px 34px 10px;
+    }
+
+    .library-controls {
+        margin-top: 15px;
+        margin-bottom: 10px;
+    }
+
+    .library-main .lesson-grid {
+        gap: 12px;
+    }
+
+    .library-main .lesson-grid .lesson-thumb {
+        height: clamp(58px, calc((100dvh - 445px) / 2), 112px);
+    }
+
+    .library-main .lesson-grid .lesson-info {
+        padding: 8px 10px 9px;
+    }
+
+    .library-main .lesson-grid .lesson-meta {
+        margin-top: 6px;
+    }
+
+    .library-main .new-lesson-card {
+        min-height: 0;
+    }
+
+    .library-footer {
+        padding-top: 12px;
+    }
+}
+
+@media (max-height: 640px) and (min-width: 721px) {
+    .library-main {
+        padding: 12px 24px 8px;
+    }
+
+    .eyebrow {
+        margin-bottom: 6px;
+    }
+
+    .library-subtitle {
+        margin-top: 5px;
+    }
+
+    .library-controls {
+        margin-top: 10px;
+        margin-bottom: 7px;
+    }
+
+    .library-main .lesson-grid {
+        gap: 8px;
+    }
+
+    .library-main .lesson-grid .lesson-thumb {
+        height: 58px;
+    }
+
+    .library-main .lesson-grid .lesson-info {
+        padding: 6px 8px 7px;
+    }
+
+    .library-main .lesson-grid .lesson-meta {
+        margin-top: 4px;
+    }
+
+    .library-footer {
+        padding-top: 7px;
+    }
 }
 
 .lesson-card {
@@ -1075,14 +1162,17 @@ kbd {
     min-height: 0;
     display: grid;
     grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
 }
 
 .tool-rail {
+    min-height: 0;
     padding: 11px 7px;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 4px;
+    overflow-y: auto;
     border-right: 1px solid #e5ebe7;
     background: #fff;
     z-index: 4;
@@ -1134,6 +1224,7 @@ kbd {
 
 .board-main {
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1308,13 +1399,14 @@ kbd {
     align-items: center;
     justify-content: center;
     padding: 0 0 7px;
+    container-type: size;
 }
 
 .page-paper {
     position: relative;
-    width: min(100%, 1030px);
+    width: min(100%, 1030px, calc(100cqh * 1.6129));
     max-height: 100%;
-    aspect-ratio: 1.66 / 1;
+    aspect-ratio: 1000 / 620;
     overflow: hidden;
     border: 1px solid #e5e7df;
     border-radius: 2px;
@@ -1360,6 +1452,76 @@ kbd {
 .drawing-layer foreignObject {
     overflow: visible;
     pointer-events: auto;
+}
+
+.drawing-layer .board-item,
+.board-item>* {
+    pointer-events: all;
+}
+
+.selection-frame {
+    pointer-events: none;
+}
+
+.selection-resize-handle {
+    fill: #fff;
+    stroke: #56866c;
+    stroke-width: 3;
+    cursor: nwse-resize;
+    pointer-events: all;
+}
+
+.selection-move-handle {
+    fill: #56866c;
+    cursor: move;
+    pointer-events: all;
+}
+
+.selection-toolbar {
+    position: absolute;
+    z-index: 4;
+    top: 10px;
+    right: 12px;
+    min-height: 34px;
+    padding: 3px 5px 3px 10px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    border: 1px solid #dce7df;
+    border-radius: 5px;
+    background: #fff;
+    box-shadow: 0 3px 12px #344b3c12;
+}
+
+.selection-toolbar span {
+    margin-right: 6px;
+    color: #728479;
+    font-size: 9px;
+}
+
+.selection-toolbar button {
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #66816f;
+}
+
+.selection-toolbar button:hover {
+    background: #edf5ef;
+    color: #386a53;
+}
+
+.selection-toolbar button.delete-selection {
+    color: #bd6c59;
+}
+
+.selection-toolbar button.delete-selection:hover {
+    background: #fff0ec;
+    color: #a74d3b;
 }
 
 .page-corner-label {
@@ -1531,6 +1693,14 @@ kbd {
     color: #88958e;
     font-size: 9px;
     white-space: nowrap;
+}
+
+.page-tab[draggable="true"] {
+    cursor: grab;
+}
+
+.page-tab[draggable="true"]:active {
+    cursor: grabbing;
 }
 
 .page-tab.active {
@@ -2340,9 +2510,7 @@ kbd {
     }
 
     .page-paper {
-        width: 100%;
-        aspect-ratio: .82 / 1;
-        max-height: none;
+        width: min(100%, 1030px, calc(100cqh * 1.6129));
     }
 
     .page-dock {
@@ -2406,7 +2574,7 @@ kbd {
     .print-page {
         position: relative;
         width: 100%;
-        aspect-ratio: 1.66 / 1;
+        aspect-ratio: 1000 / 620;
         overflow: hidden;
         break-after: page;
     }
