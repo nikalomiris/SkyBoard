@@ -1,0 +1,3 @@
+1. When adding a shape or grid or any other element, the specific tool remains selected and if the user clicks again a second instance of the tool is created (e.g. grids keep being added). Instead, the user should be able to select the added element to resize/move/delete
+2. The eraser removes parts of the pen stroke instead of the whole stroke. It looks like the strokes are broken up in pieces?
+3. Pages cannot be reordered by dragging them at the bottom strip.
