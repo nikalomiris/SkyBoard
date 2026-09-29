@@ -1436,6 +1436,10 @@ kbd {
     cursor: copy;
 }
 
+.page-paper[data-tool="shape"][data-shape="line"] {
+    cursor: crosshair;
+}
+
 .drawing-layer {
     position: absolute;
     inset: 0;
@@ -1512,6 +1516,11 @@ kbd {
 
 .selection-toolbar button:hover {
     background: #edf5ef;
+    color: #386a53;
+}
+
+.selection-toolbar button.active {
+    background: #e4f0e7;
     color: #386a53;
 }
 

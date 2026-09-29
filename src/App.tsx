@@ -13,7 +13,7 @@ type BoardItem = { id: string; scale?: number } & (
     | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
     | { type: 'text'; left: number; top: number; text: string; color: string; size: number }
     | { type: 'note'; left: number; top: number; text: string }
-    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string }
+    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean }
     | { type: 'grid'; left: number; top: number; values: string[] }
     | { type: 'image'; left: number; top: number; src: string; label: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string }
@@ -152,6 +152,7 @@ function App() {
     const [toast, setToast] = useState('')
     const [drawing, setDrawing] = useState(false)
     const [currentPoints, setCurrentPoints] = useState('')
+    const [lineDraft, setLineDraft] = useState<{ start: Point; end: Point } | null>(null)
     const [showToolOptions, setShowToolOptions] = useState(false)
     const stageRef = useRef<HTMLDivElement>(null)
     const itemGestureRef = useRef<ItemGesture | null>(null)
@@ -240,6 +241,20 @@ function App() {
         }))
     }
 
+    function getLineEndpoints(item: Extract<BoardItem, { type: 'shape' }>): { start: Point; end: Point } {
+        const scale = item.scale ?? 1
+        if (item.endX === undefined || item.endY === undefined) {
+            const centerX = item.left * 10
+            const centerY = item.top * 6.2
+            return { start: [centerX - 48 * scale, centerY], end: [centerX + 48 * scale, centerY] }
+        }
+        const start: Point = [item.left * 10, item.top * 6.2]
+        return {
+            start,
+            end: [start[0] + (item.endX - item.left) * 10 * scale, start[1] + (item.endY - item.top) * 6.2 * scale],
+        }
+    }
+
     function getItemBounds(item: BoardItem): ItemBounds {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') {
@@ -253,7 +268,14 @@ function App() {
         const left = item.left * 10
         const top = item.top * 6.2
         if (item.type === 'shape' && item.shape === 'circle') return { left: left - 46 * scale, top: top - 46 * scale, width: 92 * scale, height: 92 * scale }
-        if (item.type === 'shape') return { left: left - (item.shape === 'line' ? 48 : 0) * scale, top: top - 5 * scale, width: (item.shape === 'line' ? 96 : 125) * scale, height: (item.shape === 'line' ? 10 : 78) * scale }
+        if (item.type === 'shape' && item.shape === 'line') {
+            const { start, end } = getLineEndpoints(item)
+            const margin = 5 * scale
+            const boundsLeft = Math.min(start[0], end[0]) - margin
+            const boundsTop = Math.min(start[1], end[1]) - margin
+            return { left: boundsLeft, top: boundsTop, width: Math.max(1, Math.abs(end[0] - start[0]) + margin * 2), height: Math.max(1, Math.abs(end[1] - start[1]) + margin * 2) }
+        }
+        if (item.type === 'shape') return { left, top, width: 125 * scale, height: 78 * scale }
         if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
         const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
         const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
@@ -262,6 +284,9 @@ function App() {
 
     function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): BoardItem {
         if (item.type === 'stroke') return { ...item, points: parsePoints(item.points).map(([pointX, pointY]) => `${pointX + deltaX},${pointY + deltaY}`).join(' ') }
+        if (item.type === 'shape' && item.shape === 'line' && item.endX !== undefined && item.endY !== undefined) {
+            return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2, endX: item.endX + deltaX / 10, endY: item.endY + deltaY / 6.2 }
+        }
         return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2 }
     }
 
@@ -443,6 +468,14 @@ function App() {
         setSelectedItemId(null)
     }
 
+    function toggleLineArrow(end: 'start' | 'end') {
+        if (!selectedItem || selectedItem.type !== 'shape' || selectedItem.shape !== 'line') return
+        const property = end === 'start' ? 'startArrow' : 'endArrow'
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'shape' && item.shape === 'line'
+            ? { ...item, [property]: !item[property] }
+            : item))
+    }
+
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (studentView || !stageRef.current) return
         const { stageX, stageY } = coordinates(event)
@@ -455,7 +488,14 @@ function App() {
                 if (!('left' in item)) return false
                 const itemX = item.left * 10
                 const itemY = item.top * 6.2
-                if (item.type === 'shape') return item.shape === 'circle' ? Math.hypot(itemX - stageX, itemY - stageY) < 53 : stageX >= itemX - 12 && stageX <= itemX + 137 && stageY >= itemY - 12 && stageY <= itemY + 90
+                if (item.type === 'shape') {
+                    if (item.shape === 'circle') return Math.hypot(itemX - stageX, itemY - stageY) < 53
+                    if (item.shape === 'line') {
+                        const { start, end } = getLineEndpoints(item)
+                        return pointToSegmentDistance([stageX, stageY], start, end) < 14
+                    }
+                    return stageX >= itemX - 12 && stageX <= itemX + 137 && stageY >= itemY - 12 && stageY <= itemY + 90
+                }
                 const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : 230
                 const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : 180
                 return stageX >= itemX - 10 && stageX <= itemX + width && stageY >= itemY - 10 && stageY <= itemY + height
@@ -478,6 +518,12 @@ function App() {
             return
         }
         if (activeTool === 'shape') {
+            if (selectedShape === 'line') {
+                setSelectedItemId(null)
+                setLineDraft({ start: [stageX, stageY], end: [stageX, stageY] })
+                stageRef.current.setPointerCapture(event.pointerId)
+                return
+            }
             addBoardItem({ id: id(), type: 'shape', left: stageX / 10, top: stageY / 6.2, shape: selectedShape, color: ink })
             return
         }
@@ -497,6 +543,10 @@ function App() {
     function onStageMove(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
+        if (lineDraft) {
+            setLineDraft({ ...lineDraft, end: [stageX, stageY] })
+            return
+        }
         const gesture = itemGestureRef.current
         if (gesture) {
             const deltaX = stageX - gesture.startX
@@ -515,9 +565,26 @@ function App() {
         setCurrentPoints((points) => `${points} ${stageX},${stageY}`)
     }
 
-    function onStageUp() {
+    function onStageUp(event: ReactPointerEvent<HTMLElement>) {
         if (itemGestureRef.current) {
             itemGestureRef.current = null
+            return
+        }
+        if (lineDraft) {
+            const { stageX, stageY } = coordinates(event)
+            if (Math.hypot(stageX - lineDraft.start[0], stageY - lineDraft.start[1]) >= 3) {
+                addBoardItem({
+                    id: id(),
+                    type: 'shape',
+                    left: lineDraft.start[0] / 10,
+                    top: lineDraft.start[1] / 6.2,
+                    endX: stageX / 10,
+                    endY: stageY / 6.2,
+                    shape: 'line',
+                    color: ink,
+                })
+            }
+            setLineDraft(null)
             return
         }
         if (drawing && currentPoints && activeTool === 'eraser') {
@@ -595,7 +662,16 @@ function App() {
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" />
-            return <line x1={item.left * 10 - 48 * scale} y1={item.top * 6.2} x2={item.left * 10 + 48 * scale} y2={item.top * 6.2} stroke={item.color} strokeWidth="4" />
+            const { start, end } = getLineEndpoints(item)
+            const startMarkerId = `line-start-${item.id}`
+            const endMarkerId = `line-end-${item.id}`
+            return <g>
+                <defs>
+                    {item.startArrow && <marker id={startMarkerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={10 * scale} markerHeight={10 * scale} markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={item.color} /></marker>}
+                    {item.endArrow && <marker id={endMarkerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={10 * scale} markerHeight={10 * scale} markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill={item.color} /></marker>}
+                </defs>
+                <line x1={start[0]} y1={start[1]} x2={end[0]} y2={end[1]} stroke={item.color} strokeWidth="4" markerStart={item.startArrow ? `url(#${startMarkerId})` : undefined} markerEnd={item.endArrow ? `url(#${endMarkerId})` : undefined} />
+            </g>
         }
         if (item.type === 'grid') return (
             <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
@@ -673,13 +749,14 @@ function App() {
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setBackground(color)} aria-label={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /></div>}
                             {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div><div className="blend-track"><button className="blend-token consonant">sh</button><span className="blend-dot" /><button className="blend-token vowel">i</button><span className="blend-dot" /><button className="blend-token consonant">p</button></div><div className="blend-word"><span>sh</span><span>i</span><span>p</span><b>ship</b></div><div className="blend-controls"><button onClick={() => notify('Sound playback is ready for your student')}>▶ Play sounds</button><button onClick={() => notify('New sound row added')}>+ New row</button></div></div>}
-                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span><button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
+                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
                             <div className="board-page-area">
-                                <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool}>
+                                <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
                                         {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => beginItemGesture(event, item)}>{renderBoardItem(item)}</g>)}
                                         {selectedItem && (() => { const bounds = getItemBounds(selectedItem); return <g className="selection-frame"><rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="#56866c" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" /><rect className="selection-move-handle" x={bounds.left + bounds.width / 2 - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} /><circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} /></g> })()}
+                                        {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
                                         {currentPoints && (drawing || activeTool === 'laser') && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : activeTool === 'highlighter' ? '#f1cd63' : activeTool === 'eraser' ? background : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : activeTool === 'eraser' ? 28 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                     </svg>
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
