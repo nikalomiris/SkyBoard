@@ -5,7 +5,7 @@ import {
     Circle, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    StickyNote, Trash2, Type, Users, X,
+    RotateCw, StickyNote, Trash2, Type, Users, X,
 } from 'lucide-react'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
@@ -13,7 +13,7 @@ type BoardItem = { id: string; scale?: number } & (
     | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
     | { type: 'text'; left: number; top: number; text: string; color: string; size: number }
     | { type: 'note'; left: number; top: number; text: string }
-    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean }
+    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean; rotation?: number }
     | { type: 'grid'; left: number; top: number; values: string[] }
     | { type: 'image'; left: number; top: number; src: string; label: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string }
@@ -21,7 +21,9 @@ type BoardItem = { id: string; scale?: number } & (
 type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; kind: 'lesson' }
 type Point = [number, number]
 type ItemBounds = { left: number; top: number; width: number; height: number }
-type ItemGesture = { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
+type ItemGesture =
+    | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
+    | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 
 type PageItems = Record<string, BoardItem[]>
 
@@ -63,6 +65,21 @@ function pointToSegmentDistance(point: Point, start: Point, end: Point) {
     if (!lengthSquared) return Math.hypot(point[0] - start[0], point[1] - start[1])
     const ratio = Math.max(0, Math.min(1, ((point[0] - start[0]) * deltaX + (point[1] - start[1]) * deltaY) / lengthSquared))
     return Math.hypot(point[0] - (start[0] + ratio * deltaX), point[1] - (start[1] + ratio * deltaY))
+}
+
+function rotatePoint(point: Point, center: Point, degrees: number): Point {
+    const radians = degrees * Math.PI / 180
+    const deltaX = point[0] - center[0]
+    const deltaY = point[1] - center[1]
+    return [center[0] + deltaX * Math.cos(radians) - deltaY * Math.sin(radians), center[1] + deltaX * Math.sin(radians) + deltaY * Math.cos(radians)]
+}
+
+function boundsForPoints(points: Point[]): ItemBounds {
+    const xs = points.map(([pointX]) => pointX)
+    const ys = points.map(([, pointY]) => pointY)
+    const left = Math.min(...xs)
+    const top = Math.min(...ys)
+    return { left, top, width: Math.max(1, Math.max(...xs) - left), height: Math.max(1, Math.max(...ys) - top) }
 }
 
 function segmentDistance(firstStart: Point, firstEnd: Point, secondStart: Point, secondEnd: Point) {
@@ -243,16 +260,19 @@ function App() {
 
     function getLineEndpoints(item: Extract<BoardItem, { type: 'shape' }>): { start: Point; end: Point } {
         const scale = item.scale ?? 1
+        let start: Point
+        let end: Point
         if (item.endX === undefined || item.endY === undefined) {
             const centerX = item.left * 10
             const centerY = item.top * 6.2
-            return { start: [centerX - 48 * scale, centerY], end: [centerX + 48 * scale, centerY] }
+            start = [centerX - 48 * scale, centerY]
+            end = [centerX + 48 * scale, centerY]
+        } else {
+            start = [item.left * 10, item.top * 6.2]
+            end = [start[0] + (item.endX - item.left) * 10 * scale, start[1] + (item.endY - item.top) * 6.2 * scale]
         }
-        const start: Point = [item.left * 10, item.top * 6.2]
-        return {
-            start,
-            end: [start[0] + (item.endX - item.left) * 10 * scale, start[1] + (item.endY - item.top) * 6.2 * scale],
-        }
+        const center: Point = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
+        return { start: rotatePoint(start, center, item.rotation ?? 0), end: rotatePoint(end, center, item.rotation ?? 0) }
     }
 
     function getItemBounds(item: BoardItem): ItemBounds {
@@ -275,7 +295,13 @@ function App() {
             const boundsTop = Math.min(start[1], end[1]) - margin
             return { left: boundsLeft, top: boundsTop, width: Math.max(1, Math.abs(end[0] - start[0]) + margin * 2), height: Math.max(1, Math.abs(end[1] - start[1]) + margin * 2) }
         }
-        if (item.type === 'shape') return { left, top, width: 125 * scale, height: 78 * scale }
+        if (item.type === 'shape') {
+            const width = 125 * scale
+            const height = 78 * scale
+            const center: Point = [left + width / 2, top + height / 2]
+            const corners: Point[] = [[left, top], [left + width, top], [left + width, top + height], [left, top + height]]
+            return boundsForPoints(corners.map((point) => rotatePoint(point, center, item.rotation ?? 0)))
+        }
         if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
         const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
         const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
@@ -437,7 +463,7 @@ function App() {
         return { stageX: ((event.clientX - rect.left) / rect.width) * 1000, stageY: ((event.clientY - rect.top) / rect.height) * 620 }
     }
 
-    function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: ItemGesture['mode'] = 'move') {
+    function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: 'move' | 'resize' = 'move') {
         if (studentView || activeTool !== 'select') return
         setSelectedItemId(item.id)
         event.stopPropagation()
@@ -454,6 +480,22 @@ function App() {
         event.stopPropagation()
         const { stageX, stageY } = coordinates(event)
         itemGestureRef.current = { mode: 'resize', item: selectedItem, startX: stageX, startY: stageY, bounds: getItemBounds(selectedItem) }
+        stageRef.current?.setPointerCapture(event.pointerId)
+    }
+
+    function rotateFromHandle(event: ReactPointerEvent<HTMLButtonElement>) {
+        if (!selectedItem || selectedItem.type !== 'shape' || selectedItem.shape === 'circle') return
+        event.stopPropagation()
+        const { stageX, stageY } = coordinates(event)
+        const bounds = getItemBounds(selectedItem)
+        const center: Point = [bounds.left + bounds.width / 2, bounds.top + bounds.height / 2]
+        itemGestureRef.current = {
+            mode: 'rotate',
+            item: selectedItem,
+            center,
+            startAngle: Math.atan2(stageY - center[1], stageX - center[0]) * 180 / Math.PI,
+            startRotation: selectedItem.rotation ?? 0,
+        }
         stageRef.current?.setPointerCapture(event.pointerId)
     }
 
@@ -549,14 +591,20 @@ function App() {
         }
         const gesture = itemGestureRef.current
         if (gesture) {
-            const deltaX = stageX - gesture.startX
-            const deltaY = stageY - gesture.startY
             let updatedItem: BoardItem
-            if (gesture.mode === 'move') updatedItem = moveBoardItem(gesture.item, deltaX, deltaY)
-            else {
-                const dimension = Math.max(1, gesture.bounds.width + gesture.bounds.height)
-                const factor = Math.max(0.35, Math.min(3, 1 + (deltaX + deltaY) / dimension))
-                updatedItem = resizeBoardItem(gesture.item, factor)
+            if (gesture.mode === 'rotate') {
+                const pointerAngle = Math.atan2(stageY - gesture.center[1], stageX - gesture.center[0]) * 180 / Math.PI
+                const rotation = (gesture.startRotation + pointerAngle - gesture.startAngle + 360) % 360
+                updatedItem = { ...gesture.item, rotation }
+            } else {
+                const deltaX = stageX - gesture.startX
+                const deltaY = stageY - gesture.startY
+                if (gesture.mode === 'move') updatedItem = moveBoardItem(gesture.item, deltaX, deltaY)
+                else {
+                    const dimension = Math.max(1, gesture.bounds.width + gesture.bounds.height)
+                    const factor = Math.max(0.35, Math.min(3, 1 + (deltaX + deltaY) / dimension))
+                    updatedItem = resizeBoardItem(gesture.item, factor)
+                }
             }
             updateCurrentItems((items) => items.map((item) => item.id === gesture.item.id ? updatedItem : item))
             return
@@ -661,7 +709,7 @@ function App() {
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky">{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
-            if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" />
+            if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
             const { start, end } = getLineEndpoints(item)
             const startMarkerId = `line-start-${item.id}`
             const endMarkerId = `line-end-${item.id}`
@@ -755,7 +803,19 @@ function App() {
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
                                         {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => beginItemGesture(event, item)}>{renderBoardItem(item)}</g>)}
-                                        {selectedItem && (() => { const bounds = getItemBounds(selectedItem); return <g className="selection-frame"><rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="#56866c" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" /><rect className="selection-move-handle" x={bounds.left + bounds.width / 2 - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} /><circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} /></g> })()}
+                                        {selectedItem && (() => {
+                                            const bounds = getItemBounds(selectedItem)
+                                            const centerX = bounds.left + bounds.width / 2
+                                            return <g className="selection-frame">
+                                                <rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="#56866c" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />
+                                                {selectedItem.type === 'shape' && selectedItem.shape !== 'circle' && <>
+                                                    <line x1={centerX} y1={bounds.top - 5} x2={centerX} y2={bounds.top - 19} stroke="#56866c" strokeWidth="2" pointerEvents="none" />
+                                                    <foreignObject x={centerX - 12} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Rotate shape" aria-label="Rotate shape" onPointerDown={rotateFromHandle}><RotateCw size={13} /></button></foreignObject>
+                                                </>}
+                                                <rect className="selection-move-handle" x={centerX - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} />
+                                                <circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} />
+                                            </g>
+                                        })()}
                                         {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
                                         {currentPoints && (drawing || activeTool === 'laser') && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : activeTool === 'highlighter' ? '#f1cd63' : activeTool === 'eraser' ? background : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : activeTool === 'eraser' ? 28 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                     </svg>

@@ -1475,6 +1475,25 @@ kbd {
     pointer-events: all;
 }
 
+.selection-rotate-handle {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid #56866c;
+    border-radius: 50%;
+    background: #fff;
+    color: #386a53;
+    cursor: grab;
+    box-shadow: 0 2px 5px #344b3c20;
+    pointer-events: all;
+}
+
+.selection-rotate-handle:active {
+    cursor: grabbing;
+}
+
 .selection-move-handle {
     fill: #56866c;
     cursor: move;
