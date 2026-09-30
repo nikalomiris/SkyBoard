@@ -201,6 +201,22 @@ function App() {
     useEffect(() => { window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
     useEffect(() => { window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
     useEffect(() => { window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
+    useEffect(() => {
+        if (!folderMenu) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.folder-menu-anchor')) setFolderMenu(null)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [folderMenu])
+    useEffect(() => {
+        if (!showFileMenu) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.menu-anchor')) setShowFileMenu(null)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [showFileMenu])
     useLayoutEffect(() => {
         setSelectedItemId(null)
         itemGestureRef.current = null
@@ -800,7 +816,7 @@ function App() {
                             {visibleLessons.map((lesson) => {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
                                 const cover = lesson.cover ?? legacyCover
-                                return <article className="lesson-card" key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
+                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
                                     {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info"><div className="lesson-name-line"><h2>{lesson.title}</h2><div className="menu-anchor"><button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>{showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button><div className="menu-divider" /><span className="menu-label">Move to</span>{folders.map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}<div className="menu-divider" /><button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button></div>}</div></div><div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span></div></div>
                                 </article>

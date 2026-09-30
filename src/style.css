@@ -726,6 +726,11 @@ kbd {
     animation: rise-in .36s both;
 }
 
+.lesson-card.menu-open {
+    position: relative;
+    z-index: 5;
+}
+
 .lesson-card:nth-child(2) {
     animation-delay: .04s;
 }
