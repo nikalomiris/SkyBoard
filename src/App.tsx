@@ -37,12 +37,13 @@ const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
     { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
 ]
 const initialLessons: Lesson[] = [
-    { id: 'lesson-vowels', title: 'Short vowels · at family', folder: 'Phonics', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
-    { id: 'lesson-blends', title: 'Consonant blends', folder: 'Phonics', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
-    { id: 'lesson-syllables', title: 'Syllable safari', folder: 'Fluency', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
-    { id: 'lesson-vce', title: 'Magic e · long a', folder: 'Phonics', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
+    { id: 'lesson-vowels', title: 'Short vowels · at family', folder: 'Maya', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
+    { id: 'lesson-blends', title: 'Consonant blends', folder: 'Leo', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
+    { id: 'lesson-syllables', title: 'Syllable safari', folder: 'Amira', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
+    { id: 'lesson-vce', title: 'Magic e · long a', folder: 'Maya', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
 ]
-const folderNamesInitial = ['Phonics', 'Fluency', 'Word study']
+const folderNamesInitial = ['Maya', 'Leo', 'Amira']
+const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -125,6 +126,17 @@ function readStored<T>(key: string, fallback: T): T {
     }
 }
 
+function readStudentFolders() {
+    return readStored<string[]>('skyboard:folders', folderNamesInitial).map((folder) => legacyFolderNames[folder] ?? folder)
+}
+
+function readStudentLessons() {
+    return readStored<Lesson[]>('skyboard:lessons', initialLessons).map((lesson) => ({
+        ...lesson,
+        folder: legacyFolderNames[lesson.folder] ?? lesson.folder,
+    }))
+}
+
 function Thumb({ kind, tint }: { kind: string; tint: string }) {
     return (
         <div className={`lesson-thumb ${kind}`} style={{ backgroundColor: tint }} aria-hidden="true">
@@ -138,18 +150,18 @@ function Thumb({ kind, tint }: { kind: string; tint: string }) {
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
-    const [lessons, setLessons] = useState(() => readStored('skyboard:lessons', initialLessons))
-    const [folders, setFolders] = useState(() => readStored('skyboard:folders', folderNamesInitial))
+    const [lessons, setLessons] = useState(readStudentLessons)
+    const [folders, setFolders] = useState(readStudentFolders)
     const [activeFolder, setActiveFolder] = useState('All lessons')
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [openLesson, setOpenLesson] = useState<Lesson | null>(() => {
         const params = new URLSearchParams(window.location.search)
-        return params.get('view') === 'student' ? readStored<Lesson[]>('skyboard:lessons', initialLessons).find((lesson) => lesson.id === params.get('lesson')) ?? null : null
+        return params.get('view') === 'student' ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson')) ?? null : null
     })
     const [pages, setPages] = useState<string[]>(() => {
         const params = new URLSearchParams(window.location.search)
-        return params.get('view') === 'student' ? readStored<Lesson[]>('skyboard:lessons', initialLessons).find((lesson) => lesson.id === params.get('lesson'))?.pages ?? [] : []
+        return params.get('view') === 'student' ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson'))?.pages ?? [] : []
     })
     const [pageIndex, setPageIndex] = useState(() => {
         if (!studentView) return 0
@@ -233,7 +245,7 @@ function App() {
             try {
                 const active = JSON.parse(event.newValue) as { lessonId: string; pageIndex: number }
                 if (active.lessonId !== openLesson.id) return
-                const lesson = readStored<Lesson[]>('skyboard:lessons', initialLessons).find((candidate) => candidate.id === openLesson.id)
+                const lesson = readStudentLessons().find((candidate) => candidate.id === openLesson.id)
                 if (lesson) {
                     setOpenLesson(lesson)
                     setPages(lesson.pages)
@@ -246,7 +258,7 @@ function App() {
         }
         const syncLessons = (event: StorageEvent) => {
             if (event.key !== 'skyboard:lessons') return
-            const lesson = readStored<Lesson[]>('skyboard:lessons', initialLessons).find((candidate) => candidate.id === openLesson.id)
+            const lesson = readStudentLessons().find((candidate) => candidate.id === openLesson.id)
             if (!lesson) return
             setOpenLesson(lesson)
             setPages(lesson.pages)
@@ -818,7 +830,7 @@ function App() {
                                 const cover = lesson.cover ?? legacyCover
                                 return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
                                     {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
-                                    <div className="lesson-info"><div className="lesson-name-line"><h2>{lesson.title}</h2><div className="menu-anchor"><button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>{showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button><div className="menu-divider" /><span className="menu-label">Move to</span>{folders.map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}<div className="menu-divider" /><button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button></div>}</div></div><div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span></div></div>
+                                    <div className="lesson-info"><div className="lesson-name-line"><h2>{lesson.title}</h2><div className="menu-anchor"><button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>{showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button><div className="menu-divider" /><span className="menu-label">Move to</span>{folders.map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}<div className="menu-divider" /><button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button></div>}</div></div><div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span><span className="lesson-folder" title={`Folder: ${lesson.folder}`}><Folder size={13} /><span>{lesson.folder}</span></span></div></div>
                                 </article>
                             })}
                             <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>

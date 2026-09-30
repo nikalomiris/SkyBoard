@@ -1023,10 +1023,30 @@ kbd {
 .lesson-meta {
     margin-top: 10px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
     color: #98a39d;
     font-size: 9px;
+}
+
+.lesson-folder {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #607d69;
+}
+
+.lesson-folder svg {
+    flex: 0 0 auto;
+}
+
+.lesson-folder>span {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .lesson-file-icon {
