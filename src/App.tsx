@@ -18,7 +18,8 @@ type BoardItem = { id: string; scale?: number } & (
     | { type: 'image'; left: number; top: number; src: string; label: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string }
 )
-type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; kind: 'lesson' }
+type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic'
+type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; kind: 'lesson' }
 type Point = [number, number]
 type ItemBounds = { left: number; top: number; width: number; height: number }
 type ItemGesture =
@@ -28,6 +29,13 @@ type ItemGesture =
 type PageItems = Record<string, BoardItem[]>
 
 const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
+const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
+    { id: 'page', label: 'No thumbnail', tint: '#fffef9' },
+    { id: 'vowels', label: 'Sound tiles', tint: lessonColors[0] },
+    { id: 'blends', label: 'Word blends', tint: lessonColors[1] },
+    { id: 'safari', label: 'Syllable safari', tint: lessonColors[2] },
+    { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
+]
 const initialLessons: Lesson[] = [
     { id: 'lesson-vowels', title: 'Short vowels · at family', folder: 'Phonics', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
     { id: 'lesson-blends', title: 'Consonant blends', folder: 'Phonics', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
@@ -157,6 +165,12 @@ function App() {
     const [showBackgrounds, setShowBackgrounds] = useState(false)
     const [showBlend, setShowBlend] = useState(false)
     const [showShare, setShowShare] = useState(false)
+    const [showNewLesson, setShowNewLesson] = useState(false)
+    const [newLessonTitle, setNewLessonTitle] = useState('Untitled lesson')
+    const [newLessonFolder, setNewLessonFolder] = useState('')
+    const [creatingLessonFolder, setCreatingLessonFolder] = useState(false)
+    const [newLessonFolderName, setNewLessonFolderName] = useState('')
+    const [newLessonCover, setNewLessonCover] = useState<LessonCover>('page')
     const [showImageSearch, setShowImageSearch] = useState(false)
     const [imageQuery, setImageQuery] = useState('')
     const [imageUrl, setImageUrl] = useState('')
@@ -359,12 +373,23 @@ function App() {
         setSelectedItemId(null)
     }
 
+    function openNewLessonDialog() {
+        setNewLessonTitle('Untitled lesson')
+        setNewLessonFolder(folders.includes(activeFolder) ? activeFolder : folders[0] ?? 'My lessons')
+        setCreatingLessonFolder(false)
+        setNewLessonFolderName('')
+        setNewLessonCover('page')
+        setShowNewLesson(true)
+    }
+
     function createLesson() {
+        const cover = lessonCoverOptions.find((option) => option.id === newLessonCover) ?? lessonCoverOptions[0]
         const lesson: Lesson = {
-            id: id(), title: 'Untitled lesson', folder: folders[0] ?? 'My lessons', pages: ['Page 1'], updated: 'Just now',
-            color: lessonColors[Math.floor(Math.random() * lessonColors.length)], kind: 'lesson',
+            id: id(), title: newLessonTitle.trim() || 'Untitled lesson', folder: newLessonFolder || folders[0] || 'My lessons', pages: ['Page 1'], updated: 'Just now',
+            color: cover.tint, cover: cover.id, kind: 'lesson',
         }
         setLessons((previous) => [lesson, ...previous])
+        setShowNewLesson(false)
         openBoard(lesson)
     }
 
@@ -415,12 +440,21 @@ function App() {
         notify(`Moved to ${folder}`)
     }
 
-    function createFolder() {
-        const name = window.prompt('Name your folder')?.trim()
+    function createFolder(activate = true, requestedName?: string) {
+        const name = requestedName?.trim() ?? window.prompt('Name your folder')?.trim()
         if (!name) return
         if (folders.includes(name)) return notify('A folder with that name already exists')
         setFolders((previous) => [...previous, name])
-        setActiveFolder(name)
+        if (activate) setActiveFolder(name)
+        return name
+    }
+
+    function addFolderToNewLesson() {
+        const folder = createFolder(false, newLessonFolderName)
+        if (!folder) return
+        setNewLessonFolder(folder)
+        setNewLessonFolderName('')
+        setCreatingLessonFolder(false)
     }
 
     function startNewFolder() {
@@ -699,7 +733,7 @@ function App() {
     }
 
     function addLessonFromToolbar() {
-        createLesson()
+        openNewLessonDialog()
     }
 
     function renderBoardItem(item: BoardItem): ReactNode {
@@ -764,13 +798,14 @@ function App() {
                         <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>NAME <MoveRight size={13} /> LAST OPENED</span></div>
                         {visibleLessons.length > 0 ? <div className={`lesson-grid ${viewMode === 'list' ? 'list-view' : ''}`}>
                             {visibleLessons.map((lesson) => {
-                                const cardKind = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
+                                const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
+                                const cover = lesson.cover ?? legacyCover
                                 return <article className="lesson-card" key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    <Thumb kind={cardKind} tint={lesson.color} />
+                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info"><div className="lesson-name-line"><h2>{lesson.title}</h2><div className="menu-anchor"><button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>{showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button><div className="menu-divider" /><span className="menu-label">Move to</span>{folders.map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}<div className="menu-divider" /><button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button></div>}</div></div><div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span></div></div>
                                 </article>
                             })}
-                            <button className="new-lesson-card" onClick={createLesson}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
+                            <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
                         </div> : <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div>}
                         <div className="library-footer"><span>Made for the moments when it clicks.</span><span><span className="footer-sparkle">✳</span> SkyBoard for learning</span></div>
                     </main>
@@ -824,6 +859,85 @@ function App() {
                             <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
                         </div>
                     </main>
+                </div>
+            )}
+            {showNewLesson && (
+                <div className="modal-scrim" onClick={() => setShowNewLesson(false)}>
+                    <form
+                        className="share-modal new-lesson-modal"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => { if (event.key === 'Escape') setShowNewLesson(false) }}
+                        onSubmit={(event) => { event.preventDefault(); createLesson() }}
+                    >
+                        <button type="button" className="modal-close" onClick={() => setShowNewLesson(false)} aria-label="Close"><X size={18} /></button>
+                        <div className="share-modal-icon"><NotebookTabs size={20} /></div>
+                        <h2>New lesson</h2>
+                        <p>Give your lesson a name and choose how it appears in your library.</p>
+                        <label className="new-lesson-field">
+                            Lesson name
+                            <input autoFocus required value={newLessonTitle} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setNewLessonTitle(event.target.value)} />
+                        </label>
+                        <label className="new-lesson-field">
+                            Folder
+                            <select
+                                value={newLessonFolder}
+                                onChange={(event) => {
+                                    const value = event.target.value
+                                    if (value === '__create-folder__') {
+                                        setNewLessonFolderName('')
+                                        setCreatingLessonFolder(true)
+                                        return
+                                    }
+                                    setNewLessonFolder(value)
+                                }}
+                            >
+                                {folders.length ? folders.map((folder) => <option key={folder} value={folder}>{folder}</option>) : <option value="My lessons">My lessons</option>}
+                                <option value="__create-folder__">Create new folder...</option>
+                            </select>
+                        </label>
+                        {creatingLessonFolder && (
+                            <div className="new-folder-entry">
+                                <label className="new-lesson-field">
+                                    New folder name
+                                    <input
+                                        autoFocus
+                                        value={newLessonFolderName}
+                                        onChange={(event) => setNewLessonFolderName(event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') {
+                                                event.preventDefault()
+                                                addFolderToNewLesson()
+                                            }
+                                            if (event.key === 'Escape') {
+                                                event.stopPropagation()
+                                                setCreatingLessonFolder(false)
+                                            }
+                                        }}
+                                    />
+                                </label>
+                                <div className="new-folder-entry-actions">
+                                    <button type="button" className="cancel-button" onClick={() => setCreatingLessonFolder(false)}>Cancel</button>
+                                    <button type="button" className="add-folder-button" disabled={!newLessonFolderName.trim()} onClick={addFolderToNewLesson}>Add folder</button>
+                                </div>
+                            </div>
+                        )}
+                        <fieldset className="cover-picker">
+                            <legend>Thumbnail</legend>
+                            <p>Choose a cover, or select No thumbnail to use the first page as the card preview.</p>
+                            <div className="cover-options">
+                                {lessonCoverOptions.map((option) => (
+                                    <button key={option.id} type="button" className={`cover-option ${newLessonCover === option.id ? 'selected' : ''}`} aria-pressed={newLessonCover === option.id} onClick={() => setNewLessonCover(option.id)}>
+                                        {option.id === 'page' ? <div className="lesson-thumb page-preview cover-option-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none" /></div> : <Thumb kind={option.id} tint={option.tint} />}
+                                        <span>{option.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </fieldset>
+                        <div className="new-lesson-actions">
+                            <button type="button" className="cancel-button" onClick={() => setShowNewLesson(false)}>Cancel</button>
+                            <button type="submit" className="confirm-button" disabled={!newLessonTitle.trim()}><Plus size={15} /> Create lesson</button>
+                        </div>
+                    </form>
                 </div>
             )}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}

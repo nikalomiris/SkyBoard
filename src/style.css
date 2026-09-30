@@ -755,6 +755,17 @@ kbd {
     gap: 9px;
 }
 
+.lesson-thumb.page-preview {
+    border: 1px solid #e2e9e4;
+    background: #fffef9;
+}
+
+.page-preview svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
 .lesson-thumb.vowels {
     background-image: radial-gradient(#82a5952e .75px, transparent .75px);
     background-size: 14px 14px;
@@ -2045,6 +2056,191 @@ kbd {
     line-height: 1.7;
 }
 
+.new-lesson-modal {
+    width: min(520px, 100%);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+}
+
+.new-lesson-field {
+    display: grid;
+    gap: 6px;
+    margin-top: 15px;
+    color: #6d8174;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.new-lesson-field input,
+.new-lesson-field select {
+    width: 100%;
+    height: 38px;
+    padding: 0 10px;
+    border: 1px solid #dfe8e2;
+    border-radius: 4px;
+    background: #fbfcfb;
+    color: #42594c;
+    font: 11px 'Century Gothic', sans-serif;
+}
+
+.new-lesson-field input:focus,
+.new-lesson-field select:focus {
+    outline: 2px solid #8fb39b;
+    outline-offset: 1px;
+}
+
+.new-folder-entry {
+    margin-top: 9px;
+    padding: 10px;
+    border: 1px solid #e1e8e2;
+    border-radius: 5px;
+    background: #fbfcfb;
+}
+
+.new-folder-entry .new-lesson-field {
+    margin-top: 0;
+}
+
+.new-folder-entry-actions {
+    margin-top: 9px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 7px;
+}
+
+.new-folder-entry-actions button {
+    min-height: 30px;
+    padding: 0 9px;
+    border-radius: 4px;
+    font: 700 9px 'Century Gothic', sans-serif;
+    cursor: pointer;
+}
+
+.add-folder-button {
+    border: 1px solid #3e7768;
+    background: #3e7768;
+    color: #fff;
+}
+
+.add-folder-button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.cover-picker {
+    min-width: 0;
+    margin: 18px 0 0;
+    padding: 0;
+    border: 0;
+}
+
+.cover-picker legend {
+    padding: 0;
+    color: #6d8174;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.cover-picker>p {
+    margin-top: 5px;
+}
+
+.cover-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.cover-option {
+    min-width: 0;
+    padding: 5px;
+    display: grid;
+    gap: 6px;
+    border: 1px solid #e1e8e2;
+    border-radius: 5px;
+    background: #fff;
+    color: #657a6d;
+    text-align: left;
+    cursor: pointer;
+}
+
+.cover-option.selected {
+    border-color: #4e8069;
+    box-shadow: inset 0 0 0 1px #4e8069;
+}
+
+.cover-option:focus-visible {
+    outline: 2px solid #8fb39b;
+    outline-offset: 2px;
+}
+
+.cover-option>span {
+    overflow-wrap: anywhere;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.cover-option .lesson-thumb {
+    width: 100%;
+    height: 72px;
+    border-radius: 3px;
+}
+
+.cover-option .thumb-chip {
+    min-width: 25px;
+    height: 30px;
+    font-size: 14px;
+}
+
+.cover-option .thumb-title {
+    top: 9px;
+    left: 9px;
+    font-size: 15px;
+}
+
+.cover-option .thumb-underline {
+    bottom: 9px;
+    left: 10px;
+    width: 62px;
+}
+
+.new-lesson-actions {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.new-lesson-actions button {
+    min-height: 35px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 4px;
+    font: 700 10px 'Century Gothic', sans-serif;
+    cursor: pointer;
+}
+
+.cancel-button {
+    border: 1px solid #e0e8e2;
+    background: #fff;
+    color: #657a6d;
+}
+
+.confirm-button {
+    border: 1px solid #3e7768;
+    background: #3e7768;
+    color: #fff;
+}
+
+.confirm-button:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
 .share-link {
     margin-top: 19px;
     padding: 5px 6px 5px 10px;
@@ -2239,6 +2435,14 @@ kbd {
 }
 
 @media (max-width: 720px) {
+    .new-lesson-modal {
+        padding: 22px;
+    }
+
+    .cover-options {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .topbar {
         height: 56px;
         flex-basis: 56px;
