@@ -5,7 +5,7 @@ import {
     Circle, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    RotateCw, StickyNote, Trash2, Type, Users, X,
+    RotateCw, StickyNote, Tag, Trash2, Type, Users, X,
 } from 'lucide-react'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
@@ -19,7 +19,7 @@ type BoardItem = { id: string; scale?: number } & (
     | { type: 'pdf'; left: number; top: number; src: string; label: string }
 )
 type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic'
-type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; kind: 'lesson' }
+type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; tags?: string[]; kind: 'lesson' }
 type Point = [number, number]
 type ItemBounds = { left: number; top: number; width: number; height: number }
 type ItemGesture =
@@ -44,6 +44,7 @@ const initialLessons: Lesson[] = [
 ]
 const folderNamesInitial = ['Maya', 'Leo', 'Amira']
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
+const folderSeparator = ' / '
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -130,6 +131,27 @@ function readStudentFolders() {
     return readStored<string[]>('skyboard:folders', folderNamesInitial).map((folder) => legacyFolderNames[folder] ?? folder)
 }
 
+function getFolderParent(folder: string) {
+    const separatorIndex = folder.lastIndexOf(folderSeparator)
+    return separatorIndex < 0 ? null : folder.slice(0, separatorIndex)
+}
+
+function getFolderName(folder: string) {
+    const separatorIndex = folder.lastIndexOf(folderSeparator)
+    return separatorIndex < 0 ? folder : folder.slice(separatorIndex + folderSeparator.length)
+}
+
+function folderIsWithin(folder: string, parent: string) {
+    return folder === parent || folder.startsWith(`${parent}${folderSeparator}`)
+}
+
+function getOrderedFolders(folders: string[]) {
+    return folders.filter((folder) => !getFolderParent(folder)).flatMap((parent) => [
+        parent,
+        ...folders.filter((folder) => getFolderParent(folder) === parent),
+    ])
+}
+
 function readStudentLessons() {
     return readStored<Lesson[]>('skyboard:lessons', initialLessons).map((lesson) => ({
         ...lesson,
@@ -178,6 +200,10 @@ function App() {
     const [showBlend, setShowBlend] = useState(false)
     const [showShare, setShowShare] = useState(false)
     const [showNewLesson, setShowNewLesson] = useState(false)
+    const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
+    const [newTagValue, setNewTagValue] = useState('')
+    const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
+    const [subfolderName, setSubfolderName] = useState('')
     const [newLessonTitle, setNewLessonTitle] = useState('Untitled lesson')
     const [newLessonFolder, setNewLessonFolder] = useState('')
     const [creatingLessonFolder, setCreatingLessonFolder] = useState(false)
@@ -205,8 +231,11 @@ function App() {
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
     const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
+    const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
+    const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
+    const visibleSubfolders = isStudentFolderSelected ? folders.filter((folder) => getFolderParent(folder) === activeFolder) : []
     const visibleLessons = lessons.filter((lesson) => {
-        const matchesFolder = activeFolder === 'All lessons' || activeFolder === 'Shared with me' || lesson.folder === activeFolder
+        const matchesFolder = activeFolder === 'All lessons' || activeFolder === 'Shared with me' || folderIsWithin(lesson.folder, activeFolder)
         return matchesFolder && lesson.title.toLowerCase().includes(search.toLowerCase())
     })
 
@@ -452,12 +481,38 @@ function App() {
         notify('Lesson moved to trash')
     }
 
+    function openTagEditor(lesson: Lesson) {
+        setTagEditorLessonId(lesson.id)
+        setNewTagValue('')
+        setShowFileMenu(null)
+    }
+
+    function addLessonTag() {
+        if (!tagEditorLessonId) return
+        const tag = newTagValue.trim()
+        if (!tag) return
+        setLessons((previous) => previous.map((lesson) => {
+            if (lesson.id !== tagEditorLessonId || lesson.tags?.some((existing) => existing.toLowerCase() === tag.toLowerCase())) return lesson
+            return { ...lesson, tags: [...(lesson.tags ?? []), tag] }
+        }))
+        setNewTagValue('')
+    }
+
+    function removeLessonTag(tagToRemove: string) {
+        if (!tagEditorLessonId) return
+        setLessons((previous) => previous.map((lesson) => lesson.id === tagEditorLessonId
+            ? { ...lesson, tags: (lesson.tags ?? []).filter((tag) => tag !== tagToRemove) }
+            : lesson))
+    }
+
     function deleteFolder(folder: string) {
-        const destination = folders.find((name) => name !== folder) ?? 'Unfiled'
-        setLessons((previous) => previous.map((lesson) => lesson.folder === folder ? { ...lesson, folder: destination } : lesson))
-        setFolders((previous) => previous.filter((name) => name !== folder))
+        const parent = getFolderParent(folder)
+        const deletedFolders = folders.filter((name) => folderIsWithin(name, folder))
+        const destination = parent ?? folders.find((name) => !getFolderParent(name) && !deletedFolders.includes(name)) ?? 'Unfiled'
+        setLessons((previous) => previous.map((lesson) => folderIsWithin(lesson.folder, folder) ? { ...lesson, folder: destination } : lesson))
+        setFolders((previous) => previous.filter((name) => !deletedFolders.includes(name)))
         setFolderMenu(null)
-        if (activeFolder === folder) setActiveFolder('All lessons')
+        if (activeFolder !== 'All lessons' && activeFolder !== 'Shared with me' && folderIsWithin(activeFolder, folder)) setActiveFolder('All lessons')
         notify(`Folder deleted; lessons moved to ${destination}`)
     }
 
@@ -471,10 +526,30 @@ function App() {
     function createFolder(activate = true, requestedName?: string) {
         const name = requestedName?.trim() ?? window.prompt('Name your folder')?.trim()
         if (!name) return
+        if (name.includes(folderSeparator)) return notify('Use Add subfolder to create a folder inside a student folder')
         if (folders.includes(name)) return notify('A folder with that name already exists')
         setFolders((previous) => [...previous, name])
         if (activate) setActiveFolder(name)
         return name
+    }
+
+    function startCreateSubfolder(parent: string) {
+        setSubfolderParent(parent)
+        setSubfolderName('')
+        setFolderMenu(null)
+    }
+
+    function createSubfolder() {
+        const parent = subfolderParent
+        const name = subfolderName.trim()
+        if (!parent || !name) return
+        if (name.includes(folderSeparator)) return notify('Subfolders can’t contain another folder path')
+        const path = `${parent}${folderSeparator}${name}`
+        if (folders.includes(path)) return notify('A subfolder with that name already exists')
+        setFolders((previous) => [...previous, path])
+        setSubfolderParent(null)
+        setSubfolderName('')
+        notify(`Subfolder added to ${parent}`)
     }
 
     function addFolderToNewLesson() {
@@ -487,6 +562,11 @@ function App() {
 
     function startNewFolder() {
         createFolder()
+    }
+
+    function handleNewFolderButton() {
+        if (isStudentFolderSelected) startCreateSubfolder(activeFolder)
+        else startNewFolder()
     }
 
     function addPage() {
@@ -816,13 +896,32 @@ function App() {
                         <button className={`nav-item ${activeFolder === 'Shared with me' ? 'active' : ''}`} onClick={() => setActiveFolder('Shared with me')}><Users size={17} /> Shared with me</button>
                         <div className="nav-section-heading"><span>My folders</span><button onClick={startNewFolder} aria-label="Create folder" title="Create folder"><FolderPlus size={16} /></button></div>
                         <nav className="folder-list">
-                            {folders.map((folder, index) => <div className="folder-row" key={folder} onDragOver={(event) => event.preventDefault()} onDrop={() => draggingId && moveLesson(draggingId, folder)}><button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={17} className={`folder-color folder-${index % 4}`} /><span>{folder}</span></button><div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu"><button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div></div>)}
+                            {getOrderedFolders(folders).map((folder, index) => {
+                                const parent = getFolderParent(folder)
+                                return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={() => draggingId && moveLesson(draggingId, folder)}>
+                                    <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span></button>
+                                    <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div>
+                                </div>
+                            })}
                         </nav>
                         <div className="sidebar-bottom"><div className="storage-icon"><BookOpen size={18} /></div><div><strong>Your teaching space</strong><span>All lessons, one calm place.</span></div></div>
                     </aside>
                     <main className="library-main">
-                        <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p><h1>{activeFolder === 'All lessons' ? 'Your lessons' : activeFolder}</h1><p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={startNewFolder}><FolderPlus size={16} /> New folder</button></div>
+                        <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> New folder</button></div>
                         <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your lessons" aria-label="Search your lessons" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><button className="sort-button"><span>Last edited</span><ChevronDown size={15} /></button></div></div>
+                        {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
+                            <div className="subfolder-section-heading"><span>Subfolders</span><span>{visibleSubfolders.length}</span></div>
+                            <div className="subfolder-grid">
+                                {visibleSubfolders.map((folder) => {
+                                    const lessonCount = lessons.filter((lesson) => folderIsWithin(lesson.folder, folder)).length
+                                    return <button type="button" className="subfolder-card" key={folder} onClick={() => setActiveFolder(folder)}>
+                                        <span className="subfolder-card-icon"><Folder size={16} /></span>
+                                        <span className="subfolder-card-copy"><strong>{getFolderName(folder)}</strong><span>{lessonCount} {lessonCount === 1 ? 'lesson' : 'lessons'}</span></span>
+                                        <ChevronRight size={15} />
+                                    </button>
+                                })}
+                            </div>
+                        </section>}
                         <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>NAME <MoveRight size={13} /> LAST OPENED</span></div>
                         {visibleLessons.length > 0 ? <div className={`lesson-grid ${viewMode === 'list' ? 'list-view' : ''}`}>
                             {visibleLessons.map((lesson) => {
@@ -830,7 +929,25 @@ function App() {
                                 const cover = lesson.cover ?? legacyCover
                                 return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
                                     {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
-                                    <div className="lesson-info"><div className="lesson-name-line"><h2>{lesson.title}</h2><div className="menu-anchor"><button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>{showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}><button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button><div className="menu-divider" /><span className="menu-label">Move to</span>{folders.map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}<div className="menu-divider" /><button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button></div>}</div></div><div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span><span className="lesson-folder" title={`Folder: ${lesson.folder}`}><Folder size={13} /><span>{lesson.folder}</span></span></div></div>
+                                    <div className="lesson-info">
+                                        <div className="lesson-name-line">
+                                            <h2>{lesson.title}</h2>
+                                            <div className="menu-anchor">
+                                                <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
+                                                {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
+                                                    <button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button>
+                                                    <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
+                                                    <div className="menu-divider" />
+                                                    <span className="menu-label">Move to</span>
+                                                    {getOrderedFolders(folders).map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}
+                                                    <div className="menu-divider" />
+                                                    <button className="danger-option" onClick={() => deleteLesson(lesson.id)}><Trash2 size={14} /> Move to trash</button>
+                                                </div>}
+                                            </div>
+                                        </div>
+                                        <div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span><span className="lesson-folder" title={`Folder: ${lesson.folder}`}><Folder size={13} /><span>{lesson.folder}</span></span></div>
+                                        {Boolean(lesson.tags?.length) && <div className="lesson-tags" aria-label={`Tags for ${lesson.title}`}>{lesson.tags?.map((tag) => <span className="lesson-tag" key={tag}>{tag}</span>)}</div>}
+                                    </div>
                                 </article>
                             })}
                             <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
@@ -919,7 +1036,7 @@ function App() {
                                     setNewLessonFolder(value)
                                 }}
                             >
-                                {folders.length ? folders.map((folder) => <option key={folder} value={folder}>{folder}</option>) : <option value="My lessons">My lessons</option>}
+                                {folders.length ? getOrderedFolders(folders).map((folder) => <option key={folder} value={folder}>{getFolderParent(folder) ? `  ${getFolderParent(folder)} / ${getFolderName(folder)}` : folder}</option>) : <option value="My lessons">My lessons</option>}
                                 <option value="__create-folder__">Create new folder...</option>
                             </select>
                         </label>
@@ -968,6 +1085,8 @@ function App() {
                     </form>
                 </div>
             )}
+            {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
+            {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
             {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p><div className="share-link"><span>{`${window.location.host}${window.location.pathname}?view=student&lesson=${openLesson.id}`}</span><button onClick={() => { const url = `${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`; void navigator.clipboard?.writeText(url); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div><div className="share-permission"><Check size={14} /> Student view is read-only</div></div></div>}
             {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { updateCurrentItems((items) => [...items, { id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }]); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}

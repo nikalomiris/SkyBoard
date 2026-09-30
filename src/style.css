@@ -338,6 +338,12 @@ input:focus-visible {
     min-width: 0;
 }
 
+.folder-row.subfolder-row>.nav-item {
+    min-height: 32px;
+    padding-left: 25px;
+    font-size: 10px;
+}
+
 .folder-menu-anchor {
     position: absolute;
     right: 3px;
@@ -394,8 +400,16 @@ input:focus-visible {
     text-align: left;
 }
 
+.folder-menu button:not(.danger-option) {
+    color: #527565;
+}
+
 .folder-menu button:hover {
     background: #fff0ec;
+}
+
+.folder-menu button:not(.danger-option):hover {
+    background: #edf4ef;
 }
 
 .google-image-button {
@@ -485,6 +499,47 @@ input:focus-visible {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
+}
+
+.library-breadcrumbs {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.library-breadcrumbs button {
+    max-width: 180px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: #829087;
+    font: inherit;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.library-breadcrumbs button:hover {
+    color: #3e7768;
+    text-decoration: underline;
+}
+
+.library-breadcrumbs>svg {
+    flex: 0 0 auto;
+    color: #b3bdb7;
+}
+
+.library-breadcrumbs [aria-current="page"] {
+    min-width: 0;
+    overflow: hidden;
+    color: #2d3e37;
+    font-size: 26px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .eyebrow {
@@ -604,6 +659,86 @@ kbd {
     background: #fff;
     color: #74817a;
     font-size: 9px;
+}
+
+.subfolder-section {
+    margin: 14px 0 17px;
+}
+
+.subfolder-section-heading {
+    margin: 0 0 8px 2px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #829087;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.subfolder-section-heading span:last-child {
+    color: #9aa69f;
+    font: 9px 'DM Mono', monospace;
+}
+
+.subfolder-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr));
+    gap: 8px;
+}
+
+.subfolder-card {
+    min-width: 0;
+    min-height: 58px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border: 1px solid #e1e9e3;
+    border-radius: 5px;
+    background: #fbfdfb;
+    color: #6b7e72;
+    text-align: left;
+}
+
+.subfolder-card:hover {
+    border-color: #c6d9cb;
+    background: #f3f8f4;
+}
+
+.subfolder-card-icon {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    background: #eaf3ec;
+    color: #5b8b70;
+}
+
+.subfolder-card-copy {
+    min-width: 0;
+    flex: 1;
+    display: grid;
+    gap: 3px;
+}
+
+.subfolder-card-copy strong {
+    overflow: hidden;
+    color: #465e50;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subfolder-card-copy span {
+    color: #929e96;
+    font-size: 9px;
+}
+
+.subfolder-card>svg:last-child {
+    flex: 0 0 auto;
+    color: #9eaaa2;
 }
 
 .library-label-row {
@@ -1047,6 +1182,65 @@ kbd {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.lesson-tags,
+.tag-editor-list {
+    min-width: 0;
+    margin-top: 7px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
+}
+
+.lesson-tag {
+    max-width: 100%;
+    padding: 3px 6px;
+    border-radius: 3px;
+    background: #edf4ef;
+    color: #60766a;
+    font-size: 9px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.lesson-tag.removable {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.lesson-tag.removable button {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: inherit;
+}
+
+.lesson-tag.removable button:hover {
+    background: #dce9df;
+}
+
+.tag-editor-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.tag-editor-list {
+    margin-top: 16px;
+}
+
+.tag-empty-state {
+    margin: 16px 0 0;
+    color: #8b9990;
+    font-size: 11px;
 }
 
 .lesson-file-icon {
@@ -2579,7 +2773,8 @@ kbd {
         align-items: flex-start;
     }
 
-    .library-heading-row h1 {
+    .library-heading-row h1,
+    .library-breadcrumbs [aria-current="page"] {
         font-size: 21px;
     }
 
