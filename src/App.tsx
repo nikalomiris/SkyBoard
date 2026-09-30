@@ -41,6 +41,9 @@ const initialLessons: Lesson[] = [
     { id: 'lesson-blends', title: 'Consonant blends', folder: 'Leo', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
     { id: 'lesson-syllables', title: 'Syllable safari', folder: 'Amira', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
     { id: 'lesson-vce', title: 'Magic e · long a', folder: 'Maya', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
+    { id: 'mock-sound-mapping', title: 'Sound mapping · short vowels', folder: 'Maya', pages: ['Listen', 'Map', 'Blend'], updated: 'This week', color: lessonColors[0], cover: 'vowels', kind: 'lesson' },
+    { id: 'mock-story-retell', title: 'Retell a story · beginning to end', folder: 'Leo', pages: ['Read', 'Retell'], updated: 'This week', color: lessonColors[1], cover: 'page', kind: 'lesson' },
+    { id: 'mock-syllable-sort', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
 ]
 const folderNamesInitial = ['Maya', 'Leo', 'Amira']
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
@@ -153,7 +156,16 @@ function getOrderedFolders(folders: string[]) {
 }
 
 function readStudentLessons() {
-    return readStored<Lesson[]>('skyboard:lessons', initialLessons).map((lesson) => ({
+    const seedKey = 'skyboard:mock-lessons:v1'
+    let lessons = readStored<Lesson[]>('skyboard:lessons', initialLessons)
+    if (window.localStorage.getItem(seedKey) !== 'done') {
+        const existingIds = new Set(lessons.map((lesson) => lesson.id))
+        const missingMocks = initialLessons.filter((lesson) => lesson.id.startsWith('mock-') && !existingIds.has(lesson.id))
+        lessons = [...lessons, ...missingMocks]
+        if (missingMocks.length) window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons))
+        window.localStorage.setItem(seedKey, 'done')
+    }
+    return lessons.map((lesson) => ({
         ...lesson,
         folder: legacyFolderNames[lesson.folder] ?? lesson.folder,
     }))
@@ -459,12 +471,44 @@ function App() {
         setShowFileMenu(null)
         setItemsByPage((previous) => {
             if (previous[`${lesson.id}:0`]) return previous
-            const starter: BoardItem[] = lesson.id === 'lesson-vowels' ? [
-                { id: id(), type: 'text', left: 11, top: 18, text: 'Let’s build a word', color: '#253c37', size: 30 },
-                { id: id(), type: 'text', left: 11, top: 26, text: 'Listen · tap each sound · blend', color: '#75837e', size: 15 },
-                { id: id(), type: 'grid', left: 59, top: 25, values: ['sh', 'i', 'p', '', '', '', '', '', ''] },
-                { id: id(), type: 'note', left: 13, top: 42, text: 'Say it slowly\nsh  ·  i  ·  p' },
-            ] : []
+            const starterItems: Record<string, BoardItem[]> = {
+                'lesson-vowels': [
+                    { id: id(), type: 'text', left: 11, top: 18, text: 'Let’s build a word', color: '#253c37', size: 30 },
+                    { id: id(), type: 'text', left: 11, top: 26, text: 'Listen · tap each sound · blend', color: '#75837e', size: 15 },
+                    { id: id(), type: 'grid', left: 59, top: 25, values: ['sh', 'i', 'p', '', '', '', '', '', ''] },
+                    { id: id(), type: 'note', left: 13, top: 42, text: 'Say it slowly\nsh  ·  i  ·  p' },
+                ],
+                'mock-sound-mapping': [
+                    { id: id(), type: 'text', left: 9, top: 15, text: 'Sound mapping', color: '#253c37', size: 28 },
+                    { id: id(), type: 'text', left: 9, top: 22, text: 'Say it · tap it · map each sound', color: '#75837e', size: 15 },
+                    { id: id(), type: 'grid', left: 58, top: 24, values: ['m', 'a', 'p', 's', 'i', 't', 'sh', 'o', 'p'] },
+                    { id: id(), type: 'note', left: 10, top: 35, text: 'Stretch the word\nThen blend it fast' },
+                    { id: id(), type: 'shape', left: 38, top: 54, endX: 55, endY: 49, shape: 'line', color: '#ee7859', endArrow: true },
+                    { id: id(), type: 'shape', left: 22, top: 38, shape: 'circle', color: '#387c70' },
+                    { id: id(), type: 'stroke', points: '110,470 185,448 260,470', color: '#f1cd63', width: 20, opacity: 0.42 },
+                ],
+                'mock-story-retell': [
+                    { id: id(), type: 'text', left: 8, top: 14, text: 'Retell the story', color: '#253c37', size: 28 },
+                    { id: id(), type: 'text', left: 8, top: 22, text: 'Beginning · middle · end', color: '#75837e', size: 15 },
+                    { id: id(), type: 'note', left: 8, top: 30, text: 'Who is the main character?\nWhere does the story happen?' },
+                    { id: id(), type: 'note', left: 34, top: 30, text: 'What changes?\nWhat does the character try?' },
+                    { id: id(), type: 'note', left: 60, top: 30, text: 'How is the problem solved?\nWhat happens at the end?' },
+                    { id: id(), type: 'shape', left: 17, top: 63, shape: 'rectangle', color: '#387c70', rotation: -4 },
+                    { id: id(), type: 'shape', left: 47, top: 64, endX: 70, endY: 61, shape: 'line', color: '#ee7859', startArrow: true, endArrow: true },
+                    { id: id(), type: 'stroke', points: '90,500 150,485 210,500', color: '#253c37', width: 3, opacity: 1 },
+                ],
+                'mock-syllable-sort': [
+                    { id: id(), type: 'text', left: 8, top: 15, text: 'Open or closed?', color: '#253c37', size: 28 },
+                    { id: id(), type: 'text', left: 8, top: 22, text: 'Sort each word by its final sound', color: '#75837e', size: 15 },
+                    { id: id(), type: 'grid', left: 8, top: 30, values: ['sunset', 'rabbit', 'hotel', 'napkin', 'music', 'sun', 'picnic', 'tiger', 'sunset'] },
+                    { id: id(), type: 'note', left: 57, top: 30, text: 'Open syllable\nEnds in a vowel sound' },
+                    { id: id(), type: 'note', left: 57, top: 58, text: 'Closed syllable\nEnds in a consonant' },
+                    { id: id(), type: 'shape', left: 42, top: 33, shape: 'circle', color: '#e5ac37' },
+                    { id: id(), type: 'shape', left: 43, top: 61, shape: 'rectangle', color: '#576fc2', rotation: 3 },
+                    { id: id(), type: 'stroke', points: '75,300 260,300 435,300', color: '#f1cd63', width: 24, opacity: 0.42 },
+                ],
+            }
+            const starter: BoardItem[] = starterItems[lesson.id] ?? []
             return { ...previous, [`${lesson.id}:0`]: starter }
         })
     }
