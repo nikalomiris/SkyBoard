@@ -202,6 +202,7 @@ function App() {
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
     const [newTagValue, setNewTagValue] = useState('')
+    const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
     const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
     const [subfolderName, setSubfolderName] = useState('')
     const [newLessonTitle, setNewLessonTitle] = useState('Untitled lesson')
@@ -523,8 +524,8 @@ function App() {
         notify(`Moved to ${folder}`)
     }
 
-    function createFolder(activate = true, requestedName?: string) {
-        const name = requestedName?.trim() ?? window.prompt('Name your folder')?.trim()
+    function createFolder(activate = true, requestedName: string) {
+        const name = requestedName.trim()
         if (!name) return
         if (name.includes(folderSeparator)) return notify('Use Add subfolder to create a folder inside a student folder')
         if (folders.includes(name)) return notify('A folder with that name already exists')
@@ -534,9 +535,17 @@ function App() {
     }
 
     function startCreateSubfolder(parent: string) {
+        setShowStudentFolderDialog(false)
         setSubfolderParent(parent)
         setSubfolderName('')
         setFolderMenu(null)
+    }
+
+    function createStudentFolder() {
+        const folder = createFolder(true, subfolderName)
+        if (!folder) return
+        setShowStudentFolderDialog(false)
+        setSubfolderName('')
     }
 
     function createSubfolder() {
@@ -561,7 +570,9 @@ function App() {
     }
 
     function startNewFolder() {
-        createFolder()
+        setSubfolderParent(null)
+        setSubfolderName('')
+        setShowStudentFolderDialog(true)
     }
 
     function handleNewFolderButton() {
@@ -894,7 +905,7 @@ function App() {
                         <button className="create-primary" onClick={addLessonFromToolbar}><Plus size={17} /> New lesson <ChevronDown size={14} /></button>
                         <button className={`nav-item ${activeFolder === 'All lessons' ? 'active' : ''}`} onClick={() => setActiveFolder('All lessons')}><LayoutGrid size={17} /> All lessons <span className="nav-count">{lessons.length}</span></button>
                         <button className={`nav-item ${activeFolder === 'Shared with me' ? 'active' : ''}`} onClick={() => setActiveFolder('Shared with me')}><Users size={17} /> Shared with me</button>
-                        <div className="nav-section-heading"><span>My folders</span><button onClick={startNewFolder} aria-label="Create folder" title="Create folder"><FolderPlus size={16} /></button></div>
+                        <div className="nav-section-heading"><span>My Students</span><button onClick={startNewFolder} aria-label="Create student folder" title="Create student folder"><FolderPlus size={16} /></button></div>
                         <nav className="folder-list">
                             {getOrderedFolders(folders).map((folder, index) => {
                                 const parent = getFolderParent(folder)
@@ -1085,6 +1096,7 @@ function App() {
                     </form>
                 </div>
             )}
+            {showStudentFolderDialog && <div className="modal-scrim" onClick={() => setShowStudentFolderDialog(false)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createStudentFolder() }}><button type="button" className="modal-close" onClick={() => setShowStudentFolderDialog(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New student folder</h2><p>Create a folder to organize one student.</p><label className="new-lesson-field">Student name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Maya" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setShowStudentFolderDialog(false)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create folder</button></div></form></div>}
             {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
             {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
