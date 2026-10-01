@@ -140,6 +140,8 @@ input:focus-visible {
 .avatar {
     width: 29px;
     height: 29px;
+    flex: 0 0 auto;
+    overflow: hidden;
     display: grid;
     place-items: center;
     border-radius: 50%;
@@ -147,6 +149,29 @@ input:focus-visible {
     color: #684b3b;
     font-size: 10px;
     font-weight: 800;
+}
+
+.avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-account {
+    min-width: 0;
+    padding: 3px 5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #718079;
+}
+
+.profile-account:hover {
+    background: #eff4f1;
+    color: var(--green-dark);
 }
 
 .profile-name {
@@ -2244,6 +2269,124 @@ kbd {
     border-radius: 8px;
     background: white;
     box-shadow: 0 20px 70px #172b2140;
+}
+
+.profile-settings-modal {
+    width: min(480px, 100%);
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+}
+
+.profile-loading {
+    padding: 24px 0 5px;
+    color: #839088;
+    font-size: 11px;
+}
+
+.profile-form {
+    margin-top: 18px;
+}
+
+.profile-avatar-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.profile-avatar-preview {
+    width: 68px;
+    height: 68px;
+    flex: 0 0 auto;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: #e7f0e9;
+    color: #49735d;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.profile-avatar-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-avatar-actions {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.profile-avatar-actions>span {
+    flex: 0 0 100%;
+    color: #97a29b;
+    font-size: 9px;
+}
+
+.profile-upload-button,
+.profile-remove-photo {
+    min-height: 29px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #dfe8e2;
+    border-radius: 4px;
+    background: #fbfcfb;
+    color: #5e7668;
+    font-size: 9px;
+    cursor: pointer;
+}
+
+.profile-upload-button:hover,
+.profile-remove-photo:hover {
+    background: #edf4ef;
+}
+
+.profile-upload-button input {
+    display: none;
+}
+
+.profile-remove-photo {
+    border-color: transparent;
+    background: transparent;
+    color: #a85d4c;
+}
+
+.profile-email-value {
+    min-height: 38px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #e7ece8;
+    border-radius: 4px;
+    background: #f7f9f7;
+    color: #77857c;
+    font-size: 11px;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+
+.profile-password-form {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid #edf0ed;
+}
+
+.profile-password-form h3 {
+    margin: 0;
+    color: #42584b;
+    font-size: 12px;
+}
+
+.profile-password-form .auth-submit {
+    width: 100%;
+    margin-top: 15px;
 }
 
 .auth-screen {

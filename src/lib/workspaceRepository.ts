@@ -292,36 +292,22 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
     const existingAssetsResult = await client.from('lesson_assets').select('storage_path').eq('owner_id', ownerId)
     const existingAssets = (await throwOnError(existingAssetsResult)) as AssetRow[]
     const existingAssetPaths = new Set(existingAssets.map((asset) => asset.storage_path))
-    for (const page of existingPages) {
-        const moved = await client.from('lesson_pages').update({ position: -page.position - 1 }).eq('id', page.id)
-        if (moved.error) throw new Error(moved.error.message)
-    }
     const existingPageIds = new Map(existingPages.map((page) => [`${page.lesson_id}:${page.position}`, page.id]))
-    const desiredPageIds = new Set<string>()
     const desiredAssetPaths = new Set<string>()
     const pendingAssets = new Map<string, AssetWriteRow>()
     const pageRows = []
     for (const lesson of lessons) {
         for (const [position, name] of lesson.pages.entries()) {
             const pageId = existingPageIds.get(`${lesson.id}:${position}`) ?? crypto.randomUUID()
-            desiredPageIds.add(pageId)
             const elements = await Promise.all((itemsByPage[`${lesson.id}:${position}`] ?? []).map((item) => storeAsset(ownerId, lesson.id, pageId, item, desiredAssetPaths, existingAssetPaths, pendingAssets)))
             pageRows.push({ id: pageId, owner_id: ownerId, lesson_id: lesson.id, name, position, elements })
         }
     }
-    if (pageRows.length) {
-        const upserted = await client.from('lesson_pages').upsert(pageRows, { onConflict: 'id' })
-        if (upserted.error) throw new Error(upserted.error.message)
-    }
+    const savedPages = await client.rpc('save_lesson_pages', { p_pages: pageRows.map(({ id, lesson_id, name, position, elements }) => ({ id, lesson_id, name, position, elements })) })
+    if (savedPages.error) throw new Error(savedPages.error.message)
     if (pendingAssets.size) {
         const upserted = await client.from('lesson_assets').upsert([...pendingAssets.values()], { onConflict: 'storage_path' })
         if (upserted.error) throw new Error(upserted.error.message)
-    }
-    for (const page of existingPages) {
-        if (!desiredPageIds.has(page.id)) {
-            const deleted = await client.from('lesson_pages').delete().eq('id', page.id)
-            if (deleted.error) throw new Error(deleted.error.message)
-        }
     }
 
     const currentLessonIds = new Set(lessons.map((lesson) => lesson.id))
