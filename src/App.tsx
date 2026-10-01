@@ -1,32 +1,24 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import {
     ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
     Circle, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
-    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, Minus, MoreHorizontal, MoveRight,
+    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     RotateCw, StickyNote, Tag, Trash2, Type, Users, X,
 } from 'lucide-react'
+import AuthScreen from './components/AuthScreen'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
+import { initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import type { BoardItem, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
-type BoardItem = { id: string; scale?: number } & (
-    | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
-    | { type: 'text'; left: number; top: number; text: string; color: string; size: number }
-    | { type: 'note'; left: number; top: number; text: string }
-    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean; rotation?: number }
-    | { type: 'grid'; left: number; top: number; values: string[] }
-    | { type: 'image'; left: number; top: number; src: string; label: string }
-    | { type: 'pdf'; left: number; top: number; src: string; label: string }
-)
-type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic'
-type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; tags?: string[]; kind: 'lesson' }
 type Point = [number, number]
 type ItemBounds = { left: number; top: number; width: number; height: number }
 type ItemGesture =
     | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
-
-type PageItems = Record<string, BoardItem[]>
 
 const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
 const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
@@ -37,13 +29,13 @@ const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
     { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
 ]
 const initialLessons: Lesson[] = [
-    { id: 'lesson-vowels', title: 'Short vowels · at family', folder: 'Maya', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
-    { id: 'lesson-blends', title: 'Consonant blends', folder: 'Leo', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
-    { id: 'lesson-syllables', title: 'Syllable safari', folder: 'Amira', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
-    { id: 'lesson-vce', title: 'Magic e · long a', folder: 'Maya', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
-    { id: 'mock-sound-mapping', title: 'Sound mapping · short vowels', folder: 'Maya', pages: ['Listen', 'Map', 'Blend'], updated: 'This week', color: lessonColors[0], cover: 'vowels', kind: 'lesson' },
-    { id: 'mock-story-retell', title: 'Retell a story · beginning to end', folder: 'Leo', pages: ['Read', 'Retell'], updated: 'This week', color: lessonColors[1], cover: 'page', kind: 'lesson' },
-    { id: 'mock-syllable-sort', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
+    { id: '11111111-1111-4111-8111-111111111111', title: 'Short vowels · at family', folder: 'Maya', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
+    { id: '22222222-2222-4222-8222-222222222222', title: 'Consonant blends', folder: 'Leo', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
+    { id: '33333333-3333-4333-8333-333333333333', title: 'Syllable safari', folder: 'Amira', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
+    { id: '44444444-4444-4444-8444-444444444444', title: 'Magic e · long a', folder: 'Maya', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
+    { id: '55555555-5555-4555-8555-555555555555', title: 'Sound mapping · short vowels', folder: 'Maya', pages: ['Listen', 'Map', 'Blend'], updated: 'This week', color: lessonColors[0], cover: 'vowels', kind: 'lesson' },
+    { id: '66666666-6666-4666-8666-666666666666', title: 'Retell a story · beginning to end', folder: 'Leo', pages: ['Read', 'Retell'], updated: 'This week', color: lessonColors[1], cover: 'page', kind: 'lesson' },
+    { id: '77777777-7777-4777-8777-777777777777', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
 ]
 const folderNamesInitial = ['Maya', 'Leo', 'Amira']
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
@@ -64,7 +56,7 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
 const palette = ['#253c37', '#ee7859', '#387c70', '#576fc2', '#e5ac37', '#bc6c9a']
 
 function id() {
-    return Math.random().toString(36).slice(2, 10)
+    return crypto.randomUUID()
 }
 
 function parsePoints(points: string): Point[] {
@@ -131,6 +123,7 @@ function readStored<T>(key: string, fallback: T): T {
 }
 
 function readStudentFolders() {
+    if (isSupabaseConfigured) return []
     return readStored<string[]>('skyboard:folders', folderNamesInitial).map((folder) => legacyFolderNames[folder] ?? folder)
 }
 
@@ -156,6 +149,7 @@ function getOrderedFolders(folders: string[]) {
 }
 
 function readStudentLessons() {
+    if (isSupabaseConfigured) return []
     const seedKey = 'skyboard:mock-lessons:v1'
     let lessons = readStored<Lesson[]>('skyboard:lessons', initialLessons)
     if (window.localStorage.getItem(seedKey) !== 'done') {
@@ -184,25 +178,32 @@ function Thumb({ kind, tint }: { kind: string; tint: string }) {
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
-    const [lessons, setLessons] = useState(readStudentLessons)
-    const [folders, setFolders] = useState(readStudentFolders)
+    const [authSession, setAuthSession] = useState<Session | null>(null)
+    const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
+    const [workspaceReady, setWorkspaceReady] = useState(() => !isSupabaseConfigured || studentView)
+    const [workspaceError, setWorkspaceError] = useState('')
+    const [workspaceRetry, setWorkspaceRetry] = useState(0)
+    const [cloudSaveStatus, setCloudSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
+    const [cloudSaveError, setCloudSaveError] = useState('')
+    const [lessons, setLessons] = useState(() => isSupabaseConfigured ? [] : readStudentLessons())
+    const [folders, setFolders] = useState(() => isSupabaseConfigured ? [] : readStudentFolders())
     const [activeFolder, setActiveFolder] = useState('All lessons')
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
     const [openLesson, setOpenLesson] = useState<Lesson | null>(() => {
         const params = new URLSearchParams(window.location.search)
-        return params.get('view') === 'student' ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson')) ?? null : null
+        return params.get('view') === 'student' && !isSupabaseConfigured ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson')) ?? null : null
     })
     const [pages, setPages] = useState<string[]>(() => {
         const params = new URLSearchParams(window.location.search)
-        return params.get('view') === 'student' ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson'))?.pages ?? [] : []
+        return params.get('view') === 'student' && !isSupabaseConfigured ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson'))?.pages ?? [] : []
     })
     const [pageIndex, setPageIndex] = useState(() => {
         if (!studentView) return 0
         const active = readStored<{ lessonId: string; pageIndex: number } | null>('skyboard:active-page', null)
         return active && active.lessonId === openLesson?.id ? Math.min(active.pageIndex, Math.max(0, pages.length - 1)) : 0
     })
-    const [itemsByPage, setItemsByPage] = useState<PageItems>(() => readStored('skyboard:items', {}))
+    const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
     const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
@@ -240,6 +241,55 @@ function App() {
     const itemGestureRef = useRef<ItemGesture | null>(null)
     const imageInputRef = useRef<HTMLInputElement>(null)
     const backgroundInputRef = useRef<HTMLInputElement>(null)
+    const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
+    const workspaceSaveVersion = useRef(0)
+
+    useEffect(() => {
+        if (!supabase || studentView) {
+            setAuthReady(true)
+            return
+        }
+        let mounted = true
+        const setSession = (session: Session | null) => {
+            if (!mounted) return
+            setAuthSession(session)
+            setAuthReady(true)
+        }
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSession(session))
+        void supabase.auth.getSession().then(({ data, error }) => {
+            if (error) throw error
+            setSession(data.session)
+        }).catch(() => setSession(null))
+        return () => {
+            mounted = false
+            subscription.unsubscribe()
+        }
+    }, [studentView])
+
+    useEffect(() => {
+        if (!supabase || !authSession || studentView) return
+        let active = true
+        const ownerId = authSession.user.id
+        setWorkspaceReady(false)
+        setWorkspaceError('')
+        void (async () => {
+            let workspace = await loadWorkspace(ownerId)
+            if (!workspace.initialized) {
+                await initializeWorkspace(folderNamesInitial, initialLessons)
+                workspace = await loadWorkspace(ownerId)
+            }
+            if (!active) return
+            setFolders(workspace.folders)
+            setLessons(workspace.lessons)
+            setItemsByPage(workspace.itemsByPage)
+            setWorkspaceReady(true)
+        })().catch((error: unknown) => {
+            if (!active) return
+            setWorkspaceError(error instanceof Error ? error.message : 'Unable to load your workspace.')
+            setWorkspaceReady(true)
+        })
+        return () => { active = false }
+    }, [authSession?.user.id, studentView, workspaceRetry])
 
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
@@ -252,9 +302,27 @@ function App() {
         return matchesFolder && lesson.title.toLowerCase().includes(search.toLowerCase())
     })
 
-    useEffect(() => { window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
-    useEffect(() => { window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
-    useEffect(() => { window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
+    useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
+    useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
+    useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
+    useEffect(() => {
+        if (!supabase || !authSession || !workspaceReady || studentView) return
+        const ownerId = authSession.user.id
+        const version = ++workspaceSaveVersion.current
+        const timeout = window.setTimeout(() => {
+            setCloudSaveStatus('saving')
+            setCloudSaveError('')
+            workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage))
+            void workspaceSaveQueue.current.then(() => {
+                if (workspaceSaveVersion.current === version) setCloudSaveStatus('saved')
+            }).catch((error: unknown) => {
+                if (workspaceSaveVersion.current !== version) return
+                setCloudSaveStatus('error')
+                setCloudSaveError(error instanceof Error ? error.message : 'Unable to save your workspace.')
+            })
+        }, 450)
+        return () => window.clearTimeout(timeout)
+    }, [authSession?.user.id, workspaceReady, studentView, folders, lessons, itemsByPage])
     useEffect(() => {
         if (!folderMenu) return
         const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -333,6 +401,12 @@ function App() {
     function notify(message: string) {
         setToast(message)
         window.setTimeout(() => setToast(''), 2400)
+    }
+
+    async function signOut() {
+        if (!supabase) return
+        const { error } = await supabase.auth.signOut()
+        if (error) notify(error.message)
     }
 
     function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[])) {
@@ -472,13 +546,13 @@ function App() {
         setItemsByPage((previous) => {
             if (previous[`${lesson.id}:0`]) return previous
             const starterItems: Record<string, BoardItem[]> = {
-                'lesson-vowels': [
+                '11111111-1111-4111-8111-111111111111': [
                     { id: id(), type: 'text', left: 11, top: 18, text: 'Let’s build a word', color: '#253c37', size: 30 },
                     { id: id(), type: 'text', left: 11, top: 26, text: 'Listen · tap each sound · blend', color: '#75837e', size: 15 },
                     { id: id(), type: 'grid', left: 59, top: 25, values: ['sh', 'i', 'p', '', '', '', '', '', ''] },
                     { id: id(), type: 'note', left: 13, top: 42, text: 'Say it slowly\nsh  ·  i  ·  p' },
                 ],
-                'mock-sound-mapping': [
+                '55555555-5555-4555-8555-555555555555': [
                     { id: id(), type: 'text', left: 9, top: 15, text: 'Sound mapping', color: '#253c37', size: 28 },
                     { id: id(), type: 'text', left: 9, top: 22, text: 'Say it · tap it · map each sound', color: '#75837e', size: 15 },
                     { id: id(), type: 'grid', left: 58, top: 24, values: ['m', 'a', 'p', 's', 'i', 't', 'sh', 'o', 'p'] },
@@ -487,7 +561,7 @@ function App() {
                     { id: id(), type: 'shape', left: 22, top: 38, shape: 'circle', color: '#387c70' },
                     { id: id(), type: 'stroke', points: '110,470 185,448 260,470', color: '#f1cd63', width: 20, opacity: 0.42 },
                 ],
-                'mock-story-retell': [
+                '66666666-6666-4666-8666-666666666666': [
                     { id: id(), type: 'text', left: 8, top: 14, text: 'Retell the story', color: '#253c37', size: 28 },
                     { id: id(), type: 'text', left: 8, top: 22, text: 'Beginning · middle · end', color: '#75837e', size: 15 },
                     { id: id(), type: 'note', left: 8, top: 30, text: 'Who is the main character?\nWhere does the story happen?' },
@@ -497,7 +571,7 @@ function App() {
                     { id: id(), type: 'shape', left: 47, top: 64, endX: 70, endY: 61, shape: 'line', color: '#ee7859', startArrow: true, endArrow: true },
                     { id: id(), type: 'stroke', points: '90,500 150,485 210,500', color: '#253c37', width: 3, opacity: 1 },
                 ],
-                'mock-syllable-sort': [
+                '77777777-7777-4777-8777-777777777777': [
                     { id: id(), type: 'text', left: 8, top: 15, text: 'Open or closed?', color: '#253c37', size: 28 },
                     { id: id(), type: 'text', left: 8, top: 22, text: 'Sort each word by its final sound', color: '#75837e', size: 15 },
                     { id: id(), type: 'grid', left: 8, top: 30, values: ['sunset', 'rabbit', 'hotel', 'napkin', 'music', 'sun', 'picnic', 'tiger', 'sunset'] },
@@ -929,6 +1003,14 @@ function App() {
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
+    if (isSupabaseConfigured && !studentView) {
+        if (!authReady) return <AuthScreen loading />
+        if (!authSession) return <AuthScreen />
+        if (workspaceError) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">THERAPIST WORKSPACE</p><h1>Couldn’t load your workspace</h1><p className="auth-intro">{workspaceError}</p><button className="auth-submit" onClick={() => setWorkspaceRetry((retry) => retry + 1)}>Try again</button><button className="auth-mode-toggle" onClick={() => void signOut()}>Sign out</button></section></main>
+        if (!workspaceReady) return <AuthScreen loading loadingTitle="Loading your workspace" loadingMessage="Fetching your students and lessons from Supabase." />
+    }
+    if (isSupabaseConfigured && studentView) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>Student links aren’t connected yet</h1><p className="auth-intro">This lesson is saved in Supabase, but secure student sessions are part of the next integration step.</p></section></main>
+
     return (
         <div className="app-shell">
             <header className="topbar">
@@ -940,8 +1022,10 @@ function App() {
                         {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={() => setShowShare(true)}><Share2 size={17} /></button>}
                         <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>
                     </> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
+                    {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
                 </div>
             </header>
+            {authSession && !studentView && <div className={`cloud-storage-notice ${cloudSaveStatus === 'error' ? 'error' : ''}`} role="status">{cloudSaveStatus === 'saving' ? 'Saving your workspace…' : cloudSaveStatus === 'error' ? `Cloud save failed: ${cloudSaveError}` : `Saved to Supabase · ${authSession.user.email}`}</div>}
 
             {!openLesson ? (
                 <div className="library-layout">
