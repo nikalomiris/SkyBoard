@@ -1218,8 +1218,13 @@ function App() {
             if (item.id !== itemId || item.type !== 'grid') return item
             const rows = Math.max(1, Math.min(6, nextRows))
             const cols = Math.max(1, Math.min(6, nextCols))
-            const total = rows * cols
-            const values = Array.from({ length: total }, (_, index) => item.values[index] ?? '')
+            const oldCols = item.cols ?? 3
+            const values = Array.from({ length: rows * cols }, (_, index) => {
+                const row = Math.floor(index / cols)
+                const col = index % cols
+                const oldIndex = row * oldCols + col
+                return item.values[oldIndex] ?? ''
+            })
             return { ...item, rows, cols, values }
         }))
     }

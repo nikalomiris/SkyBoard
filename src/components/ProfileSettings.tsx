@@ -122,7 +122,7 @@ export default function ProfileSettings({ userId, email, initialDisplayName, onC
             setRemoveAvatar(false)
             onSaved(cleanedName, nextAvatarUrl)
             setProfileMessage('Profile saved.')
-            onClose()
+            window.setTimeout(() => onClose(), 700)
         } catch (error) {
             if (uploadedPath) await supabase.storage.from(avatarBucket).remove([uploadedPath])
             setProfileError(error instanceof Error ? error.message : 'Unable to save your profile.')
