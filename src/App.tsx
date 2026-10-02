@@ -39,6 +39,8 @@ const initialLessons: Lesson[] = [
     { id: '77777777-7777-4777-8777-777777777777', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
 ]
 const folderNamesInitial = ['Maya', 'Leo', 'Amira']
+const mockLessonIds = new Set(initialLessons.map((lesson) => lesson.id))
+const mockFolderNames = new Set(folderNamesInitial)
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
 const folderSeparator = ' / '
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
@@ -219,6 +221,10 @@ function App() {
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
     const [newTagValue, setNewTagValue] = useState('')
+    const [renamingLessonId, setRenamingLessonId] = useState<string | null>(null)
+    const [renameValue, setRenameValue] = useState('')
+    const [coverEditorLessonId, setCoverEditorLessonId] = useState<string | null>(null)
+    const [renamingTitle, setRenamingTitle] = useState(false)
     const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
     const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
     const [subfolderName, setSubfolderName] = useState('')
@@ -305,7 +311,9 @@ function App() {
     const currentHistory = historyTick >= 0 ? historyRef.current[currentPageKey] : undefined
     const canUndo = Boolean(currentHistory?.past.length)
     const canRedo = Boolean(currentHistory?.future.length)
+    const isMockWorkspace = !isSupabaseConfigured && !studentView
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
+    const coverEditorLesson = lessons.find((lesson) => lesson.id === coverEditorLessonId) ?? null
     const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
     const visibleSubfolders = isStudentFolderSelected ? folders.filter((folder) => getFolderParent(folder) === activeFolder) : []
     const visibleLessons = lessons.filter((lesson) => {
@@ -665,6 +673,53 @@ function App() {
         setTagEditorLessonId(lesson.id)
         setNewTagValue('')
         setShowFileMenu(null)
+    }
+
+    function startRenameLesson(lesson: Lesson) {
+        setRenamingLessonId(lesson.id)
+        setRenameValue(lesson.title)
+        setShowFileMenu(null)
+    }
+
+    function commitLessonRename(lessonId: string) {
+        const title = renameValue.trim()
+        setRenamingLessonId(null)
+        if (!title) return
+        setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, title } : lesson))
+        if (openLesson?.id === lessonId) setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function startRenameOpenLessonTitle() {
+        if (!openLesson) return
+        setRenameValue(openLesson.title)
+        setRenamingTitle(true)
+    }
+
+    function commitOpenLessonTitleRename() {
+        setRenamingTitle(false)
+        if (!openLesson) return
+        const title = renameValue.trim()
+        if (!title) return
+        setLessons((previous) => previous.map((lesson) => lesson.id === openLesson.id ? { ...lesson, title } : lesson))
+        setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function openCoverEditor(lesson: Lesson) {
+        setCoverEditorLessonId(lesson.id)
+        setShowFileMenu(null)
+    }
+
+    function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (!file || !file.type.startsWith('image/') || !coverEditorLessonId) return
+        const reader = new FileReader()
+        reader.onload = () => {
+            const coverImage = String(reader.result)
+            setLessons((previous) => previous.map((lesson) => lesson.id === coverEditorLessonId ? { ...lesson, cover: 'custom', coverImage } : lesson))
+            setCoverEditorLessonId(null)
+        }
+        reader.readAsDataURL(file)
     }
 
     function addLessonTag() {
@@ -1109,8 +1164,9 @@ function App() {
                         <nav className="folder-list">
                             {getOrderedFolders(folders).map((folder, index) => {
                                 const parent = getFolderParent(folder)
+                                const isMockFolder = isMockWorkspace && !parent && mockFolderNames.has(folder)
                                 return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggingId) moveLesson(draggingId, folder) }}>
-                                    <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span></button>
+                                    <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span>{isMockFolder && <span className="demo-tag" title="Sample student">Demo</span>}</button>
                                     <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div>
                                 </div>
                             })}
@@ -1118,6 +1174,7 @@ function App() {
                         <div className="sidebar-bottom"><div className="storage-icon"><BookOpen size={18} /></div><div><strong>Your teaching space</strong><span>All lessons, one calm place.</span></div></div>
                     </aside>
                     <main className="library-main">
+                        {isMockWorkspace && <div className="demo-banner"><Sparkles size={15} /><span>You're viewing <strong>sample students and lessons</strong> so you can explore SkyBoard. Connect Supabase to replace this demo data with your own.</span></div>}
                         <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> New folder</button></div>
                         <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your lessons" aria-label="Search your lessons" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><button className="sort-button"><span>Last edited</span><ChevronDown size={15} /></button></div></div>
                         {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
@@ -1139,15 +1196,30 @@ function App() {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
                                 const cover = lesson.cover ?? legacyCover
                                 return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
+                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <Thumb kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info">
                                         <div className="lesson-name-line">
-                                            <h2>{lesson.title}</h2>
+                                            {renamingLessonId === lesson.id ? (
+                                                <input
+                                                    className="lesson-rename-input"
+                                                    autoFocus
+                                                    value={renameValue}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onChange={(event) => setRenameValue(event.target.value)}
+                                                    onBlur={() => commitLessonRename(lesson.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter') { event.preventDefault(); commitLessonRename(lesson.id) }
+                                                        if (event.key === 'Escape') { event.stopPropagation(); setRenamingLessonId(null) }
+                                                    }}
+                                                />
+                                            ) : <h2>{lesson.title}{isMockWorkspace && mockLessonIds.has(lesson.id) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
                                             <div className="menu-anchor">
                                                 <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
                                                 {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
+                                                    <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
                                                     <button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button>
                                                     <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
+                                                    <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
                                                     <div className="menu-divider" />
                                                     <span className="menu-label">Move to</span>
                                                     {getOrderedFolders(folders).map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}
@@ -1162,7 +1234,7 @@ function App() {
                                 </article>
                             })}
                             <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
-                        </div> : <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div>}
+                        </div> : search.trim() ? <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div> : <div className="lesson-grid"><button className="new-lesson-card empty-folder-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Create new</strong><span>{activeFolder === 'All lessons' || activeFolder === 'Shared with me' ? 'Start your first lesson' : 'This folder is empty — start a lesson here'}</span></button></div>}
                         <div className="library-footer"><span>Made for the moments when it clicks.</span><span><span className="footer-sparkle">✳</span> SkyBoard for learning</span></div>
                     </main>
                 </div>
@@ -1177,7 +1249,7 @@ function App() {
                     </aside>
                     <main className="board-main">
                         <div className="board-toolbar">
-                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div><strong>{openLesson.title}</strong><span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div><button className="title-dropdown" aria-label="Lesson options"><ChevronDown size={15} /></button></div>
+                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') setRenamingTitle(false) }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
                             {!studentView && <div className="board-toolbar-center">
                                 <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} title={`Choose ${color} ink`} />)}</div>
                                 {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} title={`Choose ${color}`} />)}</div>}</div>}
@@ -1313,6 +1385,7 @@ function App() {
             {showStudentFolderDialog && <div className="modal-scrim" onClick={() => setShowStudentFolderDialog(false)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createStudentFolder() }}><button type="button" className="modal-close" onClick={() => setShowStudentFolderDialog(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New student folder</h2><p>Create a folder to organize one student.</p><label className="new-lesson-field">Student name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Maya" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setShowStudentFolderDialog(false)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create folder</button></div></form></div>}
             {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
             {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
+            {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
             {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p><div className="share-link"><span>{`${window.location.host}${window.location.pathname}?view=student&lesson=${openLesson.id}`}</span><button onClick={() => { const url = `${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`; void navigator.clipboard?.writeText(url); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div><div className="share-permission"><Check size={14} /> Student view is read-only</div></div></div>}

@@ -8,8 +8,8 @@ export type BoardItem = { id: string; scale?: number } & (
     | { type: 'pdf'; left: number; top: number; src: string; label: string; storagePath?: string }
 )
 
-export type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic'
-export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; tags?: string[]; kind: 'lesson' }
+export type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic' | 'custom'
+export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; kind: 'lesson' }
 export type PageItems = Record<string, BoardItem[]>
 
 export type WorkspaceData = {

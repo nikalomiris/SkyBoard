@@ -937,6 +937,16 @@ kbd {
     height: 100%;
 }
 
+.lesson-thumb.custom-cover {
+    background: #fffef9;
+}
+
+.lesson-thumb.custom-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
 .lesson-thumb.vowels {
     background-image: radial-gradient(#82a5952e .75px, transparent .75px);
     background-size: 14px 14px;
@@ -1102,6 +1112,46 @@ kbd {
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.lesson-rename-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: #42564d;
+    border: 1px solid #8aa796;
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-family: inherit;
+}
+
+.demo-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: #ffd166;
+    color: #6b4b00;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    vertical-align: middle;
+}
+
+.demo-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: #fff3d6;
+    border: 1px solid #ffd166;
+    color: #6b4b00;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .card-menu-button {
@@ -1272,6 +1322,20 @@ kbd {
     margin: 16px 0 0;
     color: #8b9990;
     font-size: 11px;
+}
+
+.cover-editor-preview {
+    margin: 10px 0;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e2e9e4;
+    height: 120px;
+}
+
+.cover-editor-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .lesson-file-icon {
@@ -1533,6 +1597,19 @@ kbd {
     font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: text;
+}
+
+.board-title-input {
+    display: block;
+    max-width: 220px;
+    color: #44564e;
+    font-size: 10px;
+    font-family: inherit;
+    font-weight: inherit;
+    border: 1px solid #8aa796;
+    border-radius: 4px;
+    padding: 1px 4px;
 }
 
 .board-title>div:nth-child(2) span {
