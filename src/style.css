@@ -3074,6 +3074,28 @@ kbd {
     font: 9px 'DM Mono', monospace;
 }
 
+.share-link span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.share-link-status {
+    margin-top: 19px;
+    padding: 9px 10px;
+    border: 1px solid #e2e9e4;
+    border-radius: 5px;
+    background: #fbfcfb;
+    color: #6d7e73;
+    font-size: 10px;
+}
+
+.share-link-status.error {
+    border-color: #f0c4b9;
+    background: #fff4f0;
+    color: #a4523a;
+}
+
 .share-link button {
     padding: 7px 9px;
     display: flex;

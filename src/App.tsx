@@ -11,7 +11,7 @@ import {
 import AuthScreen from './components/AuthScreen'
 import ProfileSettings from './components/ProfileSettings'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
 import type { BoardItem, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
@@ -181,6 +181,8 @@ function Thumb({ kind, tint }: { kind: string; tint: string }) {
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
+    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
+    const [sharedLessonError, setSharedLessonError] = useState('')
     const [authSession, setAuthSession] = useState<Session | null>(null)
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
     const [showProfileSettings, setShowProfileSettings] = useState(false)
@@ -221,6 +223,9 @@ function App() {
     const [showBlend, setShowBlend] = useState(false)
     const [blendRows, setBlendRows] = useState<string[][]>([['sh', 'i', 'p']])
     const [showShare, setShowShare] = useState(false)
+    const [shareLinkUrl, setShareLinkUrl] = useState('')
+    const [shareLinkLoading, setShareLinkLoading] = useState(false)
+    const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
     const [newTagValue, setNewTagValue] = useState('')
@@ -308,6 +313,38 @@ function App() {
         })
         return () => { active = false }
     }, [authSession?.user.id, studentView, workspaceRetry])
+
+    useEffect(() => {
+        if (!isSupabaseConfigured || !studentView) return
+        let active = true
+        const token = new URLSearchParams(window.location.search).get('token')
+        if (!token) {
+            setSharedLessonError('This student link is missing its access token.')
+            setSharedLessonStatus('error')
+            return
+        }
+        void getSharedLesson(token).then((shared) => {
+            if (!active) return
+            const pageNames = shared.pages.length ? shared.pages.map((page) => page.name) : ['Page 1']
+            setOpenLesson({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' })
+            setPages(pageNames)
+            setPageIndex(0)
+            const sharedItems: PageItems = {}
+            const sharedBackgrounds: Record<string, string> = {}
+            for (const page of shared.pages) {
+                sharedItems[`${shared.lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
+                sharedBackgrounds[`${shared.lesson.id}:${page.position}`] = page.background
+            }
+            setItemsByPage(sharedItems)
+            setBackgroundsByPage(sharedBackgrounds)
+            setSharedLessonStatus('ready')
+        }).catch((error: unknown) => {
+            if (!active) return
+            setSharedLessonError(error instanceof Error ? error.message : 'Unable to load this student link.')
+            setSharedLessonStatus('error')
+        })
+        return () => { active = false }
+    }, [studentView])
 
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
@@ -712,6 +749,23 @@ function App() {
         if (!openLesson) return
         setRenameValue(openLesson.title)
         setRenamingTitle(true)
+    }
+
+    function openShareDialog() {
+        if (!openLesson) return
+        setShowShare(true)
+        setShareLinkError('')
+        if (!isSupabaseConfigured) {
+            setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`)
+            return
+        }
+        setShareLinkUrl('')
+        setShareLinkLoading(true)
+        void createLessonShareLink(openLesson.id).then(({ token }) => {
+            setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&token=${token}`)
+        }).catch((error: unknown) => {
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to create a student link.')
+        }).finally(() => setShareLinkLoading(false))
     }
 
     function commitOpenLessonTitleRename() {
@@ -1221,7 +1275,11 @@ function App() {
         if (workspaceError) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">THERAPIST WORKSPACE</p><h1>Couldn’t load your workspace</h1><p className="auth-intro">{workspaceError}</p><button className="auth-submit" onClick={() => setWorkspaceRetry((retry) => retry + 1)}>Try again</button><button className="auth-mode-toggle" onClick={() => void signOut()}>Sign out</button></section></main>
         if (!workspaceReady) return <AuthScreen loading loadingTitle="Loading your workspace" loadingMessage="Fetching your students and lessons from Supabase." />
     }
-    if (isSupabaseConfigured && studentView) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>Student links aren’t connected yet</h1><p className="auth-intro">This lesson is saved in Supabase, but secure student sessions are part of the next integration step.</p></section></main>
+    if (isSupabaseConfigured && studentView) {
+        if (sharedLessonStatus === 'loading') return <AuthScreen loading loadingTitle="Loading your lesson" loadingMessage="Fetching this lesson from your teacher's link." />
+        if (sharedLessonStatus === 'error') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">{sharedLessonError}</p></section></main>
+        if (!openLesson) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">We couldn’t find a lesson for this link.</p></section></main>
+    }
 
     return (
         <div className="app-shell">
@@ -1231,7 +1289,7 @@ function App() {
                 <div className="topbar-actions">
                     {openLesson ? <>
                         {!studentView && <button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={() => { setIsFollowing(!isFollowing); notify(isFollowing ? 'Student view ended' : 'Student is following your page') }}><Users size={16} />{isFollowing ? 'Student following' : 'Student view'}<span className="online-dot" /></button>}
-                        {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={() => setShowShare(true)}><Share2 size={17} /></button>}
+                        {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
                         <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
@@ -1477,7 +1535,7 @@ function App() {
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
-            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p><div className="share-link"><span>{`${window.location.host}${window.location.pathname}?view=student&lesson=${openLesson.id}`}</span><button onClick={() => { const url = `${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`; void navigator.clipboard?.writeText(url); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div><div className="share-permission"><Check size={14} /> Student view is read-only</div></div></div>}
+            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
             {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
             {toast && <div className="toast-message"><Check size={15} />{toast}</div>}
         </div>

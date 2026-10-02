@@ -375,3 +375,22 @@ export async function initializeWorkspace(folders: string[], lessons: Lesson[]) 
     })
     if (result.error) throw new Error(result.error.message)
 }
+
+export type SharedLessonPage = { name: string; position: number; elements: BoardItem[]; background: string }
+export type SharedLessonData = { lesson: { id: string; title: string; color: string }; pages: SharedLessonPage[] }
+
+export async function createLessonShareLink(lessonId: string): Promise<{ token: string; expiresAt: string }> {
+    const result = await getClient().rpc('create_lesson_session', { p_lesson_id: lessonId })
+    if (result.error) throw new Error(result.error.message)
+    const row = (result.data as { token: string; expires_at: string }[] | null)?.[0]
+    if (!row) throw new Error('Supabase returned no data.')
+    return { token: row.token, expiresAt: row.expires_at }
+}
+
+export async function getSharedLesson(token: string): Promise<SharedLessonData> {
+    if (!supabase) throw new Error('Supabase is not configured.')
+    const result = await supabase.rpc('get_shared_lesson', { p_token: token })
+    if (result.error) throw new Error(result.error.message)
+    if (!result.data) throw new Error('This student link is invalid or has expired.')
+    return result.data as SharedLessonData
+}
