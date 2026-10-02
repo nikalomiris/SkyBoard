@@ -11,7 +11,7 @@ import {
 import AuthScreen from './components/AuthScreen'
 import ProfileSettings from './components/ProfileSettings'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
 import type { BoardItem, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
@@ -22,6 +22,8 @@ type ItemGesture =
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 
 const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
+const MIN_GRID_SIZE = 1
+const MAX_GRID_SIZE = 6
 const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
     { id: 'page', label: 'No thumbnail', tint: '#fffef9' },
     { id: 'vowels', label: 'Sound tiles', tint: lessonColors[0] },
@@ -39,6 +41,8 @@ const initialLessons: Lesson[] = [
     { id: '77777777-7777-4777-8777-777777777777', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
 ]
 const folderNamesInitial = ['Maya', 'Leo', 'Amira']
+const mockLessonIds = new Set(initialLessons.map((lesson) => lesson.id))
+const mockFolderNames = new Set(folderNamesInitial)
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
 const folderSeparator = ' / '
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
@@ -179,6 +183,8 @@ function Thumb({ kind, tint }: { kind: string; tint: string }) {
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
+    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
+    const [sharedLessonError, setSharedLessonError] = useState('')
     const [authSession, setAuthSession] = useState<Session | null>(null)
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
     const [showProfileSettings, setShowProfileSettings] = useState(false)
@@ -212,13 +218,24 @@ function App() {
     const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [ink, setInk] = useState(palette[0])
-    const [background, setBackground] = useState('#fffef9')
+    const [backgroundsByPage, setBackgroundsByPage] = useState<Record<string, string>>(() => isSupabaseConfigured ? {} : readStored('skyboard:backgrounds', {}))
+    const [backgroundScope, setBackgroundScope] = useState<'current' | 'all'>('current')
     const [showBackgrounds, setShowBackgrounds] = useState(false)
+    const [showPageDirectory, setShowPageDirectory] = useState(false)
     const [showBlend, setShowBlend] = useState(false)
+    const [blendRows, setBlendRows] = useState<string[][]>([['sh', 'i', 'p']])
     const [showShare, setShowShare] = useState(false)
+    const [shareLinkUrl, setShareLinkUrl] = useState('')
+    const [shareLinkLoading, setShareLinkLoading] = useState(false)
+    const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
     const [newTagValue, setNewTagValue] = useState('')
+    const [renamingLessonId, setRenamingLessonId] = useState<string | null>(null)
+    const [renameValue, setRenameValue] = useState('')
+    const renameCancelledRef = useRef(false)
+    const [coverEditorLessonId, setCoverEditorLessonId] = useState<string | null>(null)
+    const [renamingTitle, setRenamingTitle] = useState(false)
     const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
     const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
     const [subfolderName, setSubfolderName] = useState('')
@@ -241,10 +258,14 @@ function App() {
     const [currentPoints, setCurrentPoints] = useState('')
     const [lineDraft, setLineDraft] = useState<{ start: Point; end: Point } | null>(null)
     const [showToolOptions, setShowToolOptions] = useState(false)
+    const [editingTextId, setEditingTextId] = useState<string | null>(null)
+    const [, setHistoryTick] = useState(0)
     const stageRef = useRef<HTMLDivElement>(null)
     const itemGestureRef = useRef<ItemGesture | null>(null)
+    const historyRef = useRef<Record<string, { past: BoardItem[][]; future: BoardItem[][] }>>({})
     const imageInputRef = useRef<HTMLInputElement>(null)
     const backgroundInputRef = useRef<HTMLInputElement>(null)
+    const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
     const workspaceSaveVersion = useRef(0)
 
@@ -286,6 +307,7 @@ function App() {
             setFolders(workspace.folders)
             setLessons(workspace.lessons)
             setItemsByPage(workspace.itemsByPage)
+            setBackgroundsByPage(workspace.backgroundsByPage)
             setWorkspaceReady(true)
         })().catch((error: unknown) => {
             if (!active) return
@@ -295,10 +317,48 @@ function App() {
         return () => { active = false }
     }, [authSession?.user.id, studentView, workspaceRetry])
 
+    useEffect(() => {
+        if (!isSupabaseConfigured || !studentView) return
+        let active = true
+        const token = new URLSearchParams(window.location.search).get('token')
+        if (!token) {
+            setSharedLessonError('This student link is missing its access token.')
+            setSharedLessonStatus('error')
+            return
+        }
+        void getSharedLesson(token).then((shared) => {
+            if (!active) return
+            const pageNames = shared.pages.length ? shared.pages.map((page) => page.name) : ['Page 1']
+            setOpenLesson({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' })
+            setPages(pageNames)
+            setPageIndex(0)
+            const sharedItems: PageItems = {}
+            const sharedBackgrounds: Record<string, string> = {}
+            for (const page of shared.pages) {
+                sharedItems[`${shared.lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
+                sharedBackgrounds[`${shared.lesson.id}:${page.position}`] = page.background
+            }
+            setItemsByPage(sharedItems)
+            setBackgroundsByPage(sharedBackgrounds)
+            setSharedLessonStatus('ready')
+        }).catch((error: unknown) => {
+            if (!active) return
+            setSharedLessonError(error instanceof Error ? error.message : 'Unable to load this student link.')
+            setSharedLessonStatus('error')
+        })
+        return () => { active = false }
+    }, [studentView])
+
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
+    const background = backgroundsByPage[currentPageKey] ?? '#fffef9'
     const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
+    const currentHistory = historyRef.current[currentPageKey]
+    const canUndo = Boolean(currentHistory?.past.length)
+    const canRedo = Boolean(currentHistory?.future.length)
+    const isMockWorkspace = !isSupabaseConfigured && !studentView
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
+    const coverEditorLesson = lessons.find((lesson) => lesson.id === coverEditorLessonId) ?? null
     const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
     const visibleSubfolders = isStudentFolderSelected ? folders.filter((folder) => getFolderParent(folder) === activeFolder) : []
     const visibleLessons = lessons.filter((lesson) => {
@@ -309,6 +369,7 @@ function App() {
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
+    useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:backgrounds', JSON.stringify(backgroundsByPage)) }, [backgroundsByPage])
     useEffect(() => {
         if (!supabase || !authSession || !workspaceReady || studentView) return
         const ownerId = authSession.user.id
@@ -316,7 +377,7 @@ function App() {
         const timeout = window.setTimeout(() => {
             setCloudSaveStatus('saving')
             setCloudSaveError('')
-            workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage))
+            workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage, backgroundsByPage))
             void workspaceSaveQueue.current.then(() => {
                 if (workspaceSaveVersion.current === version) setCloudSaveStatus('saved')
             }).catch((error: unknown) => {
@@ -326,7 +387,7 @@ function App() {
             })
         }, 450)
         return () => window.clearTimeout(timeout)
-    }, [authSession?.user.id, workspaceReady, studentView, folders, lessons, itemsByPage])
+    }, [authSession?.user.id, workspaceReady, studentView, folders, lessons, itemsByPage, backgroundsByPage])
     useEffect(() => {
         const client = supabase
         if (!client || !authSession || studentView) return
@@ -361,8 +422,17 @@ function App() {
         document.addEventListener('pointerdown', closeOnOutsidePointer)
         return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
     }, [showFileMenu])
+    useEffect(() => {
+        if (!showPageDirectory) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.page-directory-anchor')) setShowPageDirectory(false)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [showPageDirectory])
     useLayoutEffect(() => {
         setSelectedItemId(null)
+        setEditingTextId(null)
         itemGestureRef.current = null
     }, [currentPageKey])
     useEffect(() => {
@@ -388,6 +458,9 @@ function App() {
         const syncItems = (event: StorageEvent) => {
             if (event.key === 'skyboard:items') setItemsByPage(readStored('skyboard:items', {}))
         }
+        const syncBackgrounds = (event: StorageEvent) => {
+            if (event.key === 'skyboard:backgrounds') setBackgroundsByPage(readStored('skyboard:backgrounds', {}))
+        }
         const syncLessons = (event: StorageEvent) => {
             if (event.key !== 'skyboard:lessons') return
             const lesson = readStudentLessons().find((candidate) => candidate.id === openLesson.id)
@@ -398,10 +471,12 @@ function App() {
         }
         window.addEventListener('storage', syncPage)
         window.addEventListener('storage', syncItems)
+        window.addEventListener('storage', syncBackgrounds)
         window.addEventListener('storage', syncLessons)
         return () => {
             window.removeEventListener('storage', syncPage)
             window.removeEventListener('storage', syncItems)
+            window.removeEventListener('storage', syncBackgrounds)
             window.removeEventListener('storage', syncLessons)
         }
     }, [openLesson, pageIndex, pages.length, studentView])
@@ -431,11 +506,42 @@ function App() {
         if (error) notify(error.message)
     }
 
-    function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[])) {
-        setItemsByPage((previous) => ({
-            ...previous,
-            [currentPageKey]: typeof nextItems === 'function' ? nextItems(previous[currentPageKey] ?? []) : nextItems,
-        }))
+    function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
+        const recordHistory = options?.recordHistory ?? true
+        setItemsByPage((previous) => {
+            const existing = previous[currentPageKey] ?? []
+            const resolved = typeof nextItems === 'function' ? nextItems(existing) : nextItems
+            if (recordHistory) {
+                const entry = historyRef.current[currentPageKey] ?? { past: [], future: [] }
+                entry.past = [...entry.past.slice(-49), existing]
+                entry.future = []
+                historyRef.current[currentPageKey] = entry
+                setHistoryTick((tick) => tick + 1)
+            }
+            return { ...previous, [currentPageKey]: resolved }
+        })
+    }
+
+    function undo() {
+        const entry = historyRef.current[currentPageKey]
+        if (!entry || !entry.past.length) return
+        const previousState = entry.past[entry.past.length - 1]
+        entry.past = entry.past.slice(0, -1)
+        entry.future = [...entry.future, currentItems]
+        setItemsByPage((previous) => ({ ...previous, [currentPageKey]: previousState }))
+        setSelectedItemId(null)
+        setHistoryTick((tick) => tick + 1)
+    }
+
+    function redo() {
+        const entry = historyRef.current[currentPageKey]
+        if (!entry || !entry.future.length) return
+        const nextState = entry.future[entry.future.length - 1]
+        entry.future = entry.future.slice(0, -1)
+        entry.past = [...entry.past, currentItems]
+        setItemsByPage((previous) => ({ ...previous, [currentPageKey]: nextState }))
+        setSelectedItemId(null)
+        setHistoryTick((tick) => tick + 1)
     }
 
     function getLineEndpoints(item: Extract<BoardItem, { type: 'shape' }>): { start: Point; end: Point } {
@@ -628,6 +734,82 @@ function App() {
         setShowFileMenu(null)
     }
 
+    function startRenameLesson(lesson: Lesson) {
+        setRenamingLessonId(lesson.id)
+        setRenameValue(lesson.title)
+        setShowFileMenu(null)
+    }
+
+    function commitLessonRename(lessonId: string) {
+        setRenamingLessonId(null)
+        if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
+        const title = renameValue.trim()
+        if (!title) return
+        setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, title } : lesson))
+        if (openLesson?.id === lessonId) setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function cancelLessonRename() {
+        renameCancelledRef.current = true
+        setRenamingLessonId(null)
+    }
+
+    function startRenameOpenLessonTitle() {
+        if (!openLesson) return
+        setRenameValue(openLesson.title)
+        setRenamingTitle(true)
+    }
+
+    function openShareDialog() {
+        if (!openLesson) return
+        setShowShare(true)
+        setShareLinkError('')
+        if (!isSupabaseConfigured) {
+            setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`)
+            return
+        }
+        setShareLinkUrl('')
+        setShareLinkLoading(true)
+        void createLessonShareLink(openLesson.id).then(({ token }) => {
+            setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&token=${token}`)
+        }).catch((error: unknown) => {
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to create a student link.')
+        }).finally(() => setShareLinkLoading(false))
+    }
+
+    function commitOpenLessonTitleRename() {
+        setRenamingTitle(false)
+        if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
+        if (!openLesson) return
+        const title = renameValue.trim()
+        if (!title) return
+        setLessons((previous) => previous.map((lesson) => lesson.id === openLesson.id ? { ...lesson, title } : lesson))
+        setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function cancelOpenLessonTitleRename() {
+        renameCancelledRef.current = true
+        setRenamingTitle(false)
+    }
+
+    function openCoverEditor(lesson: Lesson) {
+        setCoverEditorLessonId(lesson.id)
+        setShowFileMenu(null)
+    }
+
+    function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (!file || !file.type.startsWith('image/') || !coverEditorLessonId) return
+        const reader = new FileReader()
+        reader.onload = () => {
+            const coverImage = String(reader.result)
+            setLessons((previous) => previous.map((lesson) => lesson.id === coverEditorLessonId ? { ...lesson, cover: 'custom', coverImage } : lesson))
+            setCoverEditorLessonId(null)
+        }
+        reader.readAsDataURL(file)
+    }
+
     function addLessonTag() {
         if (!tagEditorLessonId) return
         const tag = newTagValue.trim()
@@ -811,6 +993,16 @@ function App() {
             : item))
     }
 
+    function setSelectedTextColor(color: string) {
+        if (!selectedItem || selectedItem.type !== 'text') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, color } : item))
+    }
+
+    function adjustSelectedTextSize(delta: number) {
+        if (!selectedItem || selectedItem.type !== 'text') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, size: Math.max(10, Math.min(96, item.size + delta)) } : item))
+    }
+
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (studentView || !stageRef.current) return
         const { stageX, stageY } = coordinates(event)
@@ -844,8 +1036,9 @@ function App() {
             return
         }
         if (activeTool === 'text') {
-            const text = window.prompt('Add text')
-            if (text) addBoardItem({ id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text, color: ink, size: 22 })
+            const newItem: Extract<BoardItem, { type: 'text' }> = { id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text: '', color: ink, size: 22 }
+            addBoardItem(newItem)
+            setEditingTextId(newItem.id)
             return
         }
         if (activeTool === 'grid') {
@@ -935,7 +1128,7 @@ function App() {
                 return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, 22 + item.width / 2)
             }))
         } else if (drawing && currentPoints && activeTool !== 'eraser') {
-            const style = activeTool === 'highlighter' ? { color: '#f1cd63', width: 24, opacity: 0.42 } :
+            const style = activeTool === 'highlighter' ? { color: ink, width: 24, opacity: 0.42 } :
                 activeTool === 'brush' ? { color: ink, width: 11, opacity: 0.76 } :
                     { color: ink, width: 3, opacity: 1 }
             updateCurrentItems((items) => [...items, { id: id(), type: 'stroke', points: currentPoints, ...style }])
@@ -963,19 +1156,68 @@ function App() {
         }
     }
 
+    function setBlendToken(rowIndex: number, tokenIndex: number, value: string) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.map((token, tIndex) => tIndex === tokenIndex ? value : token) : row))
+    }
+
+    function addBlendToken(rowIndex: number) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? [...row, ''] : row))
+    }
+
+    function removeBlendToken(rowIndex: number, tokenIndex: number) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.filter((_, tIndex) => tIndex !== tokenIndex) : row))
+    }
+
+    function addBlendRow() {
+        setBlendRows((previous) => [...previous, ['', '', '']])
+    }
+
+    function removeBlendRow(rowIndex: number) {
+        setBlendRows((previous) => previous.length > 1 ? previous.filter((_, index) => index !== rowIndex) : previous)
+    }
+
+    function playBlendRow(rowIndex: number) {
+        const row = blendRows[rowIndex]
+        if (!row?.length) return
+        if (!('speechSynthesis' in window)) {
+            notify('Sound playback is not supported in this browser')
+            return
+        }
+        window.speechSynthesis.cancel()
+        const tokens = [...row.filter((token) => token.trim()), row.join('')]
+        tokens.forEach((token) => {
+            const utterance = new SpeechSynthesisUtterance(token)
+            utterance.rate = 0.8
+            window.speechSynthesis.speak(utterance)
+        })
+    }
+
+
+    function setPageBackground(value: string) {
+        if (!openLesson) return
+        setBackgroundsByPage((previous) => {
+            if (backgroundScope === 'all') {
+                const next = { ...previous }
+                pages.forEach((_, index) => { next[`${openLesson.id}:${index}`] = value })
+                return next
+            }
+            return { ...previous, [currentPageKey]: value }
+        })
+    }
+
     function handleBackgroundImage(event: ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0]
         if (!file || !file.type.startsWith('image/')) return
         const reader = new FileReader()
-        reader.onload = () => setBackground(`url("${String(reader.result)}") center / cover no-repeat`)
+        reader.onload = () => setPageBackground(`url("${String(reader.result)}") center / cover no-repeat`)
         reader.readAsDataURL(file)
         event.target.value = ''
     }
 
-    function handleGridEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number, itemId: string) {
+    function handleGridEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number, itemId: string, cols: number, total: number) {
         if (event.key !== 'Enter') return
         event.preventDefault()
-        const nextIndex = index + 3 < 9 ? index + 3 : (index % 3 + 1) % 3
+        const nextIndex = index + cols < total ? index + cols : (index % cols + 1) % cols
         const target = document.querySelector<HTMLInputElement>(`[data-grid-input="${itemId}-${nextIndex}"]`)
         target?.focus()
     }
@@ -983,6 +1225,23 @@ function App() {
     function setGridValue(itemId: string, valueIndex: number, value: string) {
         if (studentView) return
         updateCurrentItems((items) => items.map((item) => item.id === itemId && item.type === 'grid' ? { ...item, values: item.values.map((cell, index) => index === valueIndex ? value : cell) } : item))
+    }
+
+    function resizeGrid(itemId: string, nextRows: number, nextCols: number) {
+        if (studentView) return
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== itemId || item.type !== 'grid') return item
+            const rows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextRows))
+            const cols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextCols))
+            const oldCols = item.cols ?? 3
+            const values = Array.from({ length: rows * cols }, (_, index) => {
+                const row = Math.floor(index / cols)
+                const col = index % cols
+                const oldIndex = row * oldCols + col
+                return item.values[oldIndex] ?? ''
+            })
+            return { ...item, rows, cols, values }
+        }))
     }
 
     function exportPdf() {
@@ -998,7 +1257,7 @@ function App() {
     function renderBoardItem(item: BoardItem): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
-        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="Century Gothic, sans-serif">{item.text}</text>
+        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="'Century Gothic', CenturyGothic, AppleGothic, sans-serif">{item.text}</text>
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky">{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
@@ -1014,14 +1273,19 @@ function App() {
                 <line x1={start[0]} y1={start[1]} x2={end[0]} y2={end[1]} stroke={item.color} strokeWidth="4" markerStart={item.startArrow ? `url(#${startMarkerId})` : undefined} markerEnd={item.endArrow ? `url(#${endMarkerId})` : undefined} />
             </g>
         }
-        if (item.type === 'grid') return (
-            <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
-                <div className="board-grid" data-grid-id={item.id}>
-                    {item.values.map((value, index) => <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id)} />)}
-                </div>
-            </foreignObject>
-        )
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} /></foreignObject>
+        if (item.type === 'grid') {
+            const cols = item.cols ?? 3
+            const rows = item.rows ?? 3
+            const total = cols * rows
+            return (
+                <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
+                    <div className="board-grid" data-grid-id={item.id} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
+                        {item.values.map((value, index) => <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />)}
+                    </div>
+                </foreignObject>
+            )
+        }
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} /></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
@@ -1031,7 +1295,11 @@ function App() {
         if (workspaceError) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">THERAPIST WORKSPACE</p><h1>Couldn’t load your workspace</h1><p className="auth-intro">{workspaceError}</p><button className="auth-submit" onClick={() => setWorkspaceRetry((retry) => retry + 1)}>Try again</button><button className="auth-mode-toggle" onClick={() => void signOut()}>Sign out</button></section></main>
         if (!workspaceReady) return <AuthScreen loading loadingTitle="Loading your workspace" loadingMessage="Fetching your students and lessons from Supabase." />
     }
-    if (isSupabaseConfigured && studentView) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>Student links aren’t connected yet</h1><p className="auth-intro">This lesson is saved in Supabase, but secure student sessions are part of the next integration step.</p></section></main>
+    if (isSupabaseConfigured && studentView) {
+        if (sharedLessonStatus === 'loading') return <AuthScreen loading loadingTitle="Loading your lesson" loadingMessage="Fetching this lesson from your teacher's link." />
+        if (sharedLessonStatus === 'error') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">{sharedLessonError}</p></section></main>
+        if (!openLesson) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">We couldn’t find a lesson for this link.</p></section></main>
+    }
 
     return (
         <div className="app-shell">
@@ -1041,7 +1309,7 @@ function App() {
                 <div className="topbar-actions">
                     {openLesson ? <>
                         {!studentView && <button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={() => { setIsFollowing(!isFollowing); notify(isFollowing ? 'Student view ended' : 'Student is following your page') }}><Users size={16} />{isFollowing ? 'Student following' : 'Student view'}<span className="online-dot" /></button>}
-                        {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={() => setShowShare(true)}><Share2 size={17} /></button>}
+                        {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
                         <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
@@ -1059,8 +1327,9 @@ function App() {
                         <nav className="folder-list">
                             {getOrderedFolders(folders).map((folder, index) => {
                                 const parent = getFolderParent(folder)
-                                return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={() => draggingId && moveLesson(draggingId, folder)}>
-                                    <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span></button>
+                                const isMockFolder = isMockWorkspace && !parent && mockFolderNames.has(folder)
+                                return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggingId) moveLesson(draggingId, folder) }}>
+                                    <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span>{isMockFolder && <span className="demo-tag" title="Sample student">Demo</span>}</button>
                                     <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div>
                                 </div>
                             })}
@@ -1068,6 +1337,7 @@ function App() {
                         <div className="sidebar-bottom"><div className="storage-icon"><BookOpen size={18} /></div><div><strong>Your teaching space</strong><span>All lessons, one calm place.</span></div></div>
                     </aside>
                     <main className="library-main">
+                        {isMockWorkspace && <div className="demo-banner"><Sparkles size={15} /><span>You're viewing <strong>sample students and lessons</strong> so you can explore SkyBoard. Connect Supabase to replace this demo data with your own.</span></div>}
                         <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> New folder</button></div>
                         <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your lessons" aria-label="Search your lessons" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><button className="sort-button"><span>Last edited</span><ChevronDown size={15} /></button></div></div>
                         {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
@@ -1088,16 +1358,31 @@ function App() {
                             {visibleLessons.map((lesson) => {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
                                 const cover = lesson.cover ?? legacyCover
-                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
+                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
+                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <Thumb kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info">
                                         <div className="lesson-name-line">
-                                            <h2>{lesson.title}</h2>
+                                            {renamingLessonId === lesson.id ? (
+                                                <input
+                                                    className="lesson-rename-input"
+                                                    autoFocus
+                                                    value={renameValue}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onChange={(event) => setRenameValue(event.target.value)}
+                                                    onBlur={() => commitLessonRename(lesson.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === 'Enter') { event.preventDefault(); commitLessonRename(lesson.id) }
+                                                        if (event.key === 'Escape') { event.stopPropagation(); cancelLessonRename() }
+                                                    }}
+                                                />
+                                            ) : <h2>{lesson.title}{isMockWorkspace && mockLessonIds.has(lesson.id) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
                                             <div className="menu-anchor">
                                                 <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
                                                 {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
+                                                    <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
                                                     <button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button>
                                                     <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
+                                                    <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
                                                     <div className="menu-divider" />
                                                     <span className="menu-label">Move to</span>
                                                     {getOrderedFolders(folders).map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}
@@ -1112,7 +1397,7 @@ function App() {
                                 </article>
                             })}
                             <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
-                        </div> : <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div>}
+                        </div> : search.trim() ? <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div> : <div className="lesson-grid"><button className="new-lesson-card empty-folder-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Create new</strong><span>{activeFolder === 'All lessons' || activeFolder === 'Shared with me' ? 'Start your first lesson' : 'This folder is empty — start a lesson here'}</span></button></div>}
                         <div className="library-footer"><span>Made for the moments when it clicks.</span><span><span className="footer-sparkle">✳</span> SkyBoard for learning</span></div>
                     </main>
                 </div>
@@ -1127,22 +1412,35 @@ function App() {
                     </aside>
                     <main className="board-main">
                         <div className="board-toolbar">
-                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div><strong>{openLesson.title}</strong><span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div><button className="title-dropdown" aria-label="Lesson options"><ChevronDown size={15} /></button></div>
+                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
+                            <div className="page-directory-anchor">
+                                <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
+                                {showPageDirectory && <div className="page-directory-menu">{pages.map((page, index) => <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}</div>}
+                            </div>
                             {!studentView && <div className="board-toolbar-center">
-                                <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} />)}</div>
-                                {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} />)}</div>}</div>}
+                                <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} title={`Choose ${color} ink`} />)}</div>
+                                {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} title={`Choose ${color}`} />)}</div>}</div>}
                             </div>}
-                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" onClick={() => updateCurrentItems((items) => items.slice(0, -1))}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" onClick={() => notify('Nothing to redo yet')}><ChevronRight size={18} /></button></>}</div>
+                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><ChevronRight size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace">
-                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setBackground(color)} aria-label={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /></div>}
-                            {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div><div className="blend-track"><button className="blend-token consonant">sh</button><span className="blend-dot" /><button className="blend-token vowel">i</button><span className="blend-dot" /><button className="blend-token consonant">p</button></div><div className="blend-word"><span>sh</span><span>i</span><span>p</span><b>ship</b></div><div className="blend-controls"><button onClick={() => notify('Sound playback is ready for your student')}>▶ Play sounds</button><button onClick={() => notify('New sound row added')}>+ New row</button></div></div>}
-                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
+                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
+                            {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div>{blendRows.map((row, rowIndex) => <div className="blend-row" key={rowIndex}><div className="blend-track">{row.map((token, tokenIndex) => <div className={`blend-token-wrap ${tokenIndex > 0 ? 'with-dot' : ''}`} key={tokenIndex}><input className="blend-token" value={token} onChange={(event) => setBlendToken(rowIndex, tokenIndex, event.target.value)} aria-label={`Row ${rowIndex + 1} sound ${tokenIndex + 1}`} />{row.length > 1 && <button className="blend-token-remove" aria-label={`Remove sound ${tokenIndex + 1}`} title="Remove sound" onClick={() => removeBlendToken(rowIndex, tokenIndex)}><X size={10} /></button>}</div>)}<button className="blend-add-token" aria-label="Add a sound" title="Add a sound" onClick={() => addBlendToken(rowIndex)}><Plus size={13} /></button></div><div className="blend-word">{row.map((token, tokenIndex) => <span key={tokenIndex}>{token}</span>)}<b>{row.join('')}</b></div><div className="blend-controls"><button onClick={() => playBlendRow(rowIndex)}><AudioLines size={14} /> Play sounds</button>{blendRows.length > 1 && <button onClick={() => removeBlendRow(rowIndex)}><Trash2 size={14} /> Remove row</button>}</div></div>)}<button className="blend-add-row" onClick={addBlendRow}><Plus size={14} /> New row</button></div>}
+                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}{selectedItem.type === 'text' && <><div className="selection-text-colors">{palette.map((color) => <button key={color} className={selectedItem.color === color ? 'active' : ''} style={{ backgroundColor: color }} title={`Text color ${color}`} aria-label={`Text color ${color}`} onClick={() => setSelectedTextColor(color)} />)}</div><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}{selectedItem.type === 'grid' && <><span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span><button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button><button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button><button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button><button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => beginItemGesture(event, item)}>{renderBoardItem(item)}</g>)}
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } beginItemGesture(event, item) }} onDoubleClick={() => { if (item.type === 'text') { setSelectedItemId(item.id); setEditingTextId(item.id) } }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, item.text.length * item.size * 0.62 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                            className="board-text-input"
+                                            autoFocus
+                                            value={item.text}
+                                            placeholder="Type here…"
+                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" }}
+                                            onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
+                                            onBlur={() => { setEditingTextId(null); if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id)) }}
+                                            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.currentTarget.blur() } }}
+                                        /></foreignObject> : renderBoardItem(item)}</g>)}
                                         {selectedItem && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
@@ -1157,7 +1455,12 @@ function App() {
                                             </g>
                                         })()}
                                         {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
-                                        {currentPoints && (drawing || activeTool === 'laser') && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : activeTool === 'highlighter' ? '#f1cd63' : activeTool === 'eraser' ? background : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : activeTool === 'eraser' ? 28 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
+                                        {currentPoints && drawing && activeTool === 'eraser' && (() => {
+                                            const erasePoints = parsePoints(currentPoints)
+                                            const [lastX, lastY] = erasePoints[erasePoints.length - 1]
+                                            return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
+                                        })()}
+                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                     </svg>
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
@@ -1249,10 +1552,11 @@ function App() {
             {showStudentFolderDialog && <div className="modal-scrim" onClick={() => setShowStudentFolderDialog(false)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createStudentFolder() }}><button type="button" className="modal-close" onClick={() => setShowStudentFolderDialog(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New student folder</h2><p>Create a folder to organize one student.</p><label className="new-lesson-field">Student name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Maya" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setShowStudentFolderDialog(false)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create folder</button></div></form></div>}
             {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
             {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
+            {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
-            {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
-            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p><div className="share-link"><span>{`${window.location.host}${window.location.pathname}?view=student&lesson=${openLesson.id}`}</span><button onClick={() => { const url = `${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`; void navigator.clipboard?.writeText(url); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div><div className="share-permission"><Check size={14} /> Student view is read-only</div></div></div>}
-            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { updateCurrentItems((items) => [...items, { id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }]); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
+            {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
+            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
+            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
             {toast && <div className="toast-message"><Check size={15} />{toast}</div>}
         </div>
     )

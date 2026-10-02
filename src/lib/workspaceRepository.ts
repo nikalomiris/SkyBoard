@@ -6,8 +6,8 @@ const assetBucket = 'lesson-assets'
 
 type StudentRow = { id: string; name: string; position: number }
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
-type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; color: string; tags: string[]; updated_at: string }
-type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[] }
+type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; updated_at: string }
+type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[]; background: string }
 type AssetRow = { storage_path: string }
 type AssetWriteRow = { owner_id: string; lesson_id: string; page_id: string; storage_path: string; file_name: string; content_type: string; size_bytes: number }
 
@@ -67,8 +67,8 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         client.from('profiles').select('workspace_initialized').eq('id', ownerId).maybeSingle(),
         client.from('students').select('id,name,position').eq('owner_id', ownerId).order('position'),
         client.from('student_folders').select('id,student_id,parent_id,name,position').eq('owner_id', ownerId).order('position'),
-        client.from('lessons').select('id,student_id,folder_id,title,position,cover,color,tags,updated_at').eq('owner_id', ownerId).order('position'),
-        client.from('lesson_pages').select('id,lesson_id,name,position,elements').eq('owner_id', ownerId).order('position'),
+        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,updated_at').eq('owner_id', ownerId).order('position'),
+        client.from('lesson_pages').select('id,lesson_id,name,position,elements,background').eq('owner_id', ownerId).order('position'),
     ])
     if (profileResult.error) throw new Error(profileResult.error.message)
     const students = (await throwOnError(studentsResult)) as StudentRow[]
@@ -118,6 +118,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
     for (const page of pageRows) pagesByLesson.set(page.lesson_id, [...(pagesByLesson.get(page.lesson_id) ?? []), page])
     const assetUrlCache = new Map<string, string>()
     const itemsByPage: WorkspaceData['itemsByPage'] = {}
+    const backgroundsByPage: WorkspaceData['backgroundsByPage'] = {}
     const lessons: Lesson[] = lessonRows.map((row) => {
         const student = row.student_id ? studentById.get(row.student_id) : undefined
         const lessonPages = pagesByLesson.get(row.id) ?? []
@@ -130,6 +131,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             updated: formatUpdated(row.updated_at),
             color: row.color,
             cover: row.cover as Lesson['cover'],
+            coverImage: row.cover_image ?? undefined,
             tags: row.tags ?? [],
             kind: 'lesson',
         }
@@ -138,6 +140,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         for (const page of pagesByLesson.get(row.id) ?? []) {
             const elements = await resolveAssetUrls(page.elements ?? [], assetUrlCache)
             if (elements.length) itemsByPage[`${row.id}:${page.position}`] = elements
+            if (page.background) backgroundsByPage[`${row.id}:${page.position}`] = page.background
         }
     }
 
@@ -145,6 +148,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         folders,
         lessons,
         itemsByPage,
+        backgroundsByPage,
         initialized: profileResult.data?.workspace_initialized ?? false,
         hasData: students.length > 0 || lessonRows.length > 0,
     }
@@ -198,7 +202,7 @@ async function storeAsset(ownerId: string, lessonId: string, pageId: string, ite
     return { ...item, src: `storage://${storagePath}`, storagePath }
 }
 
-export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage']) {
+export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage'], backgroundsByPage: WorkspaceData['backgroundsByPage']) {
     const client = getClient()
     const existingStudentsResult = await client.from('students').select('id,name,position').eq('owner_id', ownerId)
     const existingStudents = (await throwOnError(existingStudentsResult)) as StudentRow[]
@@ -278,6 +282,7 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
             title: lesson.title,
             position,
             cover: lesson.cover ?? null,
+            cover_image: lesson.coverImage ?? null,
             color: lesson.color,
             tags: lesson.tags ?? [],
         }
@@ -300,10 +305,11 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
         for (const [position, name] of lesson.pages.entries()) {
             const pageId = existingPageIds.get(`${lesson.id}:${position}`) ?? crypto.randomUUID()
             const elements = await Promise.all((itemsByPage[`${lesson.id}:${position}`] ?? []).map((item) => storeAsset(ownerId, lesson.id, pageId, item, desiredAssetPaths, existingAssetPaths, pendingAssets)))
-            pageRows.push({ id: pageId, owner_id: ownerId, lesson_id: lesson.id, name, position, elements })
+            const background = backgroundsByPage[`${lesson.id}:${position}`] ?? '#fffef9'
+            pageRows.push({ id: pageId, owner_id: ownerId, lesson_id: lesson.id, name, position, elements, background })
         }
     }
-    const savedPages = await client.rpc('save_lesson_pages', { p_pages: pageRows.map(({ id, lesson_id, name, position, elements }) => ({ id, lesson_id, name, position, elements })) })
+    const savedPages = await client.rpc('save_lesson_pages', { p_pages: pageRows.map(({ id, lesson_id, name, position, elements, background }) => ({ id, lesson_id, name, position, elements, background })) })
     if (savedPages.error) throw new Error(savedPages.error.message)
     if (pendingAssets.size) {
         const upserted = await client.from('lesson_assets').upsert([...pendingAssets.values()], { onConflict: 'storage_path' })
@@ -370,4 +376,23 @@ export async function initializeWorkspace(folders: string[], lessons: Lesson[]) 
         })),
     })
     if (result.error) throw new Error(result.error.message)
+}
+
+export type SharedLessonPage = { name: string; position: number; elements: BoardItem[]; background: string }
+export type SharedLessonData = { lesson: { id: string; title: string; color: string }; pages: SharedLessonPage[] }
+
+export async function createLessonShareLink(lessonId: string): Promise<{ token: string; expiresAt: string }> {
+    const result = await getClient().rpc('create_lesson_session', { p_lesson_id: lessonId })
+    if (result.error) throw new Error(result.error.message)
+    const row = (result.data as { token: string; expires_at: string }[] | null)?.[0]
+    if (!row) throw new Error('Supabase returned no data.')
+    return { token: row.token, expiresAt: row.expires_at }
+}
+
+export async function getSharedLesson(token: string): Promise<SharedLessonData> {
+    if (!supabase) throw new Error('Supabase is not configured.')
+    const result = await supabase.rpc('get_shared_lesson', { p_token: token })
+    if (result.error) throw new Error(result.error.message)
+    if (!result.data) throw new Error('This student link is invalid or has expired.')
+    return result.data as SharedLessonData
 }
