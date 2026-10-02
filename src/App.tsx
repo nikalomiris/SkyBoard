@@ -217,7 +217,9 @@ function App() {
     const [backgroundsByPage, setBackgroundsByPage] = useState<Record<string, string>>(() => isSupabaseConfigured ? {} : readStored('skyboard:backgrounds', {}))
     const [backgroundScope, setBackgroundScope] = useState<'current' | 'all'>('current')
     const [showBackgrounds, setShowBackgrounds] = useState(false)
+    const [showPageDirectory, setShowPageDirectory] = useState(false)
     const [showBlend, setShowBlend] = useState(false)
+    const [blendRows, setBlendRows] = useState<string[][]>([['sh', 'i', 'p']])
     const [showShare, setShowShare] = useState(false)
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
@@ -380,6 +382,14 @@ function App() {
         document.addEventListener('pointerdown', closeOnOutsidePointer)
         return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
     }, [showFileMenu])
+    useEffect(() => {
+        if (!showPageDirectory) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.page-directory-anchor')) setShowPageDirectory(false)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [showPageDirectory])
     useLayoutEffect(() => {
         setSelectedItemId(null)
         setEditingTextId(null)
@@ -1077,6 +1087,43 @@ function App() {
         }
     }
 
+    function setBlendToken(rowIndex: number, tokenIndex: number, value: string) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.map((token, tIndex) => tIndex === tokenIndex ? value : token) : row))
+    }
+
+    function addBlendToken(rowIndex: number) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? [...row, ''] : row))
+    }
+
+    function removeBlendToken(rowIndex: number, tokenIndex: number) {
+        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.filter((_, tIndex) => tIndex !== tokenIndex) : row))
+    }
+
+    function addBlendRow() {
+        setBlendRows((previous) => [...previous, ['', '', '']])
+    }
+
+    function removeBlendRow(rowIndex: number) {
+        setBlendRows((previous) => previous.length > 1 ? previous.filter((_, index) => index !== rowIndex) : previous)
+    }
+
+    function playBlendRow(rowIndex: number) {
+        const row = blendRows[rowIndex]
+        if (!row?.length) return
+        if (!('speechSynthesis' in window)) {
+            notify('Sound playback is not supported in this browser')
+            return
+        }
+        window.speechSynthesis.cancel()
+        const tokens = [...row.filter((token) => token.trim()), row.join('')]
+        tokens.forEach((token) => {
+            const utterance = new SpeechSynthesisUtterance(token)
+            utterance.rate = 0.8
+            window.speechSynthesis.speak(utterance)
+        })
+    }
+
+
     function setPageBackground(value: string) {
         if (!openLesson) return
         setBackgroundsByPage((previous) => {
@@ -1288,6 +1335,10 @@ function App() {
                     <main className="board-main">
                         <div className="board-toolbar">
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') setRenamingTitle(false) }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
+                            <div className="page-directory-anchor">
+                                <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
+                                {showPageDirectory && <div className="page-directory-menu">{pages.map((page, index) => <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}</div>}
+                            </div>
                             {!studentView && <div className="board-toolbar-center">
                                 <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} title={`Choose ${color} ink`} />)}</div>
                                 {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} title={`Choose ${color}`} />)}</div>}</div>}
@@ -1296,7 +1347,7 @@ function App() {
                         </div>
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div><div className="blend-track"><button className="blend-token consonant">sh</button><span className="blend-dot" /><button className="blend-token vowel">i</button><span className="blend-dot" /><button className="blend-token consonant">p</button></div><div className="blend-word"><span>sh</span><span>i</span><span>p</span><b>ship</b></div><div className="blend-controls"><button onClick={() => notify('Sound playback is ready for your student')}>▶ Play sounds</button><button onClick={() => notify('New sound row added')}>+ New row</button></div></div>}
+                            {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div>{blendRows.map((row, rowIndex) => <div className="blend-row" key={rowIndex}><div className="blend-track">{row.map((token, tokenIndex) => <div className={`blend-token-wrap ${tokenIndex > 0 ? 'with-dot' : ''}`} key={tokenIndex}><input className="blend-token" value={token} onChange={(event) => setBlendToken(rowIndex, tokenIndex, event.target.value)} aria-label={`Row ${rowIndex + 1} sound ${tokenIndex + 1}`} />{row.length > 1 && <button className="blend-token-remove" aria-label={`Remove sound ${tokenIndex + 1}`} title="Remove sound" onClick={() => removeBlendToken(rowIndex, tokenIndex)}><X size={10} /></button>}</div>)}<button className="blend-add-token" aria-label="Add a sound" title="Add a sound" onClick={() => addBlendToken(rowIndex)}><Plus size={13} /></button></div><div className="blend-word">{row.map((token, tokenIndex) => <span key={tokenIndex}>{token}</span>)}<b>{row.join('')}</b></div><div className="blend-controls"><button onClick={() => playBlendRow(rowIndex)}><AudioLines size={14} /> Play sounds</button>{blendRows.length > 1 && <button onClick={() => removeBlendRow(rowIndex)}><Trash2 size={14} /> Remove row</button>}</div></div>)}<button className="blend-add-row" onClick={addBlendRow}><Plus size={14} /> New row</button></div>}
                             {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}{selectedItem.type === 'text' && <><div className="selection-text-colors">{palette.map((color) => <button key={color} className={selectedItem.color === color ? 'active' : ''} style={{ backgroundColor: color }} title={`Text color ${color}`} aria-label={`Text color ${color}`} onClick={() => setSelectedTextColor(color)} />)}</div><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}{selectedItem.type === 'grid' && <><span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span><button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button><button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button><button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button><button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
