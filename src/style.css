@@ -205,6 +205,12 @@ input:focus-visible {
     background: #eff4f1;
 }
 
+.icon-button:disabled {
+    color: #c3ccc6;
+    cursor: not-allowed;
+    background: transparent;
+}
+
 .export-button {
     border: 0;
     border-radius: 6px;
@@ -1807,6 +1813,27 @@ kbd {
     color: #a74d3b;
 }
 
+.selection-text-colors {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 4px;
+    padding-right: 6px;
+    border-right: 1px solid #e3e8e5;
+}
+
+.selection-text-colors button {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+}
+
+.selection-text-colors button.active {
+    border-color: #386a53;
+}
+
 .page-corner-label {
     position: absolute;
     right: 22px;
@@ -1870,6 +1897,17 @@ kbd {
     outline: 1px solid #8fb39c;
 }
 
+.board-text-input {
+    width: 100%;
+    height: 100%;
+    padding: 2px 4px;
+    border: 1px dashed #8fb39c;
+    border-radius: 4px;
+    background: #ffffffcc;
+    outline: none;
+    white-space: nowrap;
+}
+
 .board-image {
     width: 100%;
     height: 100%;
@@ -1878,6 +1916,8 @@ kbd {
     border-radius: 4px;
     background: white;
     box-shadow: 0 4px 12px #344b3c12;
+    -webkit-user-drag: none;
+    user-select: none;
 }
 
 .pdf-tile {
@@ -1941,6 +1981,13 @@ kbd {
 
 .laser-stroke {
     filter: drop-shadow(0 0 5px #f9aa85);
+}
+
+.eraser-cursor {
+    fill: #56866c1f;
+    stroke: #56866c;
+    stroke-width: 1.5;
+    stroke-dasharray: 3 3;
 }
 
 .page-dock {
@@ -3336,6 +3383,15 @@ kbd {
     .blend-panel,
     .board-layout {
         display: none !important;
+    }
+
+    html,
+    body,
+    #root,
+    .app-shell {
+        height: auto;
+        min-height: 0;
+        overflow: visible;
     }
 
     .print-pages {

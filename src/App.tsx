@@ -241,10 +241,14 @@ function App() {
     const [currentPoints, setCurrentPoints] = useState('')
     const [lineDraft, setLineDraft] = useState<{ start: Point; end: Point } | null>(null)
     const [showToolOptions, setShowToolOptions] = useState(false)
+    const [editingTextId, setEditingTextId] = useState<string | null>(null)
+    const [historyTick, setHistoryTick] = useState(0)
     const stageRef = useRef<HTMLDivElement>(null)
     const itemGestureRef = useRef<ItemGesture | null>(null)
+    const historyRef = useRef<Record<string, { past: BoardItem[][]; future: BoardItem[][] }>>({})
     const imageInputRef = useRef<HTMLInputElement>(null)
     const backgroundInputRef = useRef<HTMLInputElement>(null)
+    const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
     const workspaceSaveVersion = useRef(0)
 
@@ -298,6 +302,9 @@ function App() {
     const currentPageKey = openLesson ? `${openLesson.id}:${pageIndex}` : ''
     const currentItems = itemsByPage[currentPageKey] ?? []
     const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
+    const currentHistory = historyTick >= 0 ? historyRef.current[currentPageKey] : undefined
+    const canUndo = Boolean(currentHistory?.past.length)
+    const canRedo = Boolean(currentHistory?.future.length)
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
     const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
     const visibleSubfolders = isStudentFolderSelected ? folders.filter((folder) => getFolderParent(folder) === activeFolder) : []
@@ -363,6 +370,7 @@ function App() {
     }, [showFileMenu])
     useLayoutEffect(() => {
         setSelectedItemId(null)
+        setEditingTextId(null)
         itemGestureRef.current = null
     }, [currentPageKey])
     useEffect(() => {
@@ -431,11 +439,42 @@ function App() {
         if (error) notify(error.message)
     }
 
-    function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[])) {
-        setItemsByPage((previous) => ({
-            ...previous,
-            [currentPageKey]: typeof nextItems === 'function' ? nextItems(previous[currentPageKey] ?? []) : nextItems,
-        }))
+    function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
+        const recordHistory = options?.recordHistory ?? true
+        setItemsByPage((previous) => {
+            const existing = previous[currentPageKey] ?? []
+            const resolved = typeof nextItems === 'function' ? nextItems(existing) : nextItems
+            if (recordHistory) {
+                const entry = historyRef.current[currentPageKey] ?? { past: [], future: [] }
+                entry.past = [...entry.past.slice(-49), existing]
+                entry.future = []
+                historyRef.current[currentPageKey] = entry
+                setHistoryTick((tick) => tick + 1)
+            }
+            return { ...previous, [currentPageKey]: resolved }
+        })
+    }
+
+    function undo() {
+        const entry = historyRef.current[currentPageKey]
+        if (!entry || !entry.past.length) return
+        const previousState = entry.past[entry.past.length - 1]
+        entry.past = entry.past.slice(0, -1)
+        entry.future = [...entry.future, currentItems]
+        setItemsByPage((previous) => ({ ...previous, [currentPageKey]: previousState }))
+        setSelectedItemId(null)
+        setHistoryTick((tick) => tick + 1)
+    }
+
+    function redo() {
+        const entry = historyRef.current[currentPageKey]
+        if (!entry || !entry.future.length) return
+        const nextState = entry.future[entry.future.length - 1]
+        entry.future = entry.future.slice(0, -1)
+        entry.past = [...entry.past, currentItems]
+        setItemsByPage((previous) => ({ ...previous, [currentPageKey]: nextState }))
+        setSelectedItemId(null)
+        setHistoryTick((tick) => tick + 1)
     }
 
     function getLineEndpoints(item: Extract<BoardItem, { type: 'shape' }>): { start: Point; end: Point } {
@@ -811,6 +850,16 @@ function App() {
             : item))
     }
 
+    function setSelectedTextColor(color: string) {
+        if (!selectedItem || selectedItem.type !== 'text') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, color } : item))
+    }
+
+    function adjustSelectedTextSize(delta: number) {
+        if (!selectedItem || selectedItem.type !== 'text') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, size: Math.max(10, Math.min(96, item.size + delta)) } : item))
+    }
+
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (studentView || !stageRef.current) return
         const { stageX, stageY } = coordinates(event)
@@ -844,8 +893,9 @@ function App() {
             return
         }
         if (activeTool === 'text') {
-            const text = window.prompt('Add text')
-            if (text) addBoardItem({ id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text, color: ink, size: 22 })
+            const newItem: Extract<BoardItem, { type: 'text' }> = { id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text: '', color: ink, size: 22 }
+            addBoardItem(newItem)
+            setEditingTextId(newItem.id)
             return
         }
         if (activeTool === 'grid') {
@@ -935,7 +985,7 @@ function App() {
                 return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, 22 + item.width / 2)
             }))
         } else if (drawing && currentPoints && activeTool !== 'eraser') {
-            const style = activeTool === 'highlighter' ? { color: '#f1cd63', width: 24, opacity: 0.42 } :
+            const style = activeTool === 'highlighter' ? { color: ink, width: 24, opacity: 0.42 } :
                 activeTool === 'brush' ? { color: ink, width: 11, opacity: 0.76 } :
                     { color: ink, width: 3, opacity: 1 }
             updateCurrentItems((items) => [...items, { id: id(), type: 'stroke', points: currentPoints, ...style }])
@@ -998,7 +1048,7 @@ function App() {
     function renderBoardItem(item: BoardItem): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
-        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="Century Gothic, sans-serif">{item.text}</text>
+        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="'Century Gothic', CenturyGothic, AppleGothic, sans-serif">{item.text}</text>
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky">{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
@@ -1021,7 +1071,7 @@ function App() {
                 </div>
             </foreignObject>
         )
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} /></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} /></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
@@ -1059,7 +1109,7 @@ function App() {
                         <nav className="folder-list">
                             {getOrderedFolders(folders).map((folder, index) => {
                                 const parent = getFolderParent(folder)
-                                return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={() => draggingId && moveLesson(draggingId, folder)}>
+                                return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggingId) moveLesson(draggingId, folder) }}>
                                     <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span></button>
                                     <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div>
                                 </div>
@@ -1088,7 +1138,7 @@ function App() {
                             {visibleLessons.map((lesson) => {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
                                 const cover = lesson.cover ?? legacyCover
-                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={() => setDraggingId(lesson.id)} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
+                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
                                     {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : <Thumb kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info">
                                         <div className="lesson-name-line">
@@ -1129,20 +1179,29 @@ function App() {
                         <div className="board-toolbar">
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div><strong>{openLesson.title}</strong><span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div><button className="title-dropdown" aria-label="Lesson options"><ChevronDown size={15} /></button></div>
                             {!studentView && <div className="board-toolbar-center">
-                                <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} />)}</div>
-                                {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} />)}</div>}</div>}
+                                <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} title={`Choose ${color} ink`} />)}</div>
+                                {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} title={`Choose ${color}`} />)}</div>}</div>}
                             </div>}
-                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" onClick={() => updateCurrentItems((items) => items.slice(0, -1))}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" onClick={() => notify('Nothing to redo yet')}><ChevronRight size={18} /></button></>}</div>
+                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><ChevronRight size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setBackground(color)} aria-label={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /></div>}
                             {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div><div className="blend-track"><button className="blend-token consonant">sh</button><span className="blend-dot" /><button className="blend-token vowel">i</button><span className="blend-dot" /><button className="blend-token consonant">p</button></div><div className="blend-word"><span>sh</span><span>i</span><span>p</span><b>ship</b></div><div className="blend-controls"><button onClick={() => notify('Sound playback is ready for your student')}>▶ Play sounds</button><button onClick={() => notify('New sound row added')}>+ New row</button></div></div>}
-                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
+                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}{selectedItem.type === 'text' && <><div className="selection-text-colors">{palette.map((color) => <button key={color} className={selectedItem.color === color ? 'active' : ''} style={{ backgroundColor: color }} title={`Text color ${color}`} aria-label={`Text color ${color}`} onClick={() => setSelectedTextColor(color)} />)}</div><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => beginItemGesture(event, item)}>{renderBoardItem(item)}</g>)}
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } beginItemGesture(event, item) }} onDoubleClick={() => { if (item.type === 'text') { setSelectedItemId(item.id); setEditingTextId(item.id) } }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, item.text.length * item.size * 0.62 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                            className="board-text-input"
+                                            autoFocus
+                                            value={item.text}
+                                            placeholder="Type here…"
+                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" }}
+                                            onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
+                                            onBlur={() => { setEditingTextId(null); if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id)) }}
+                                            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.currentTarget.blur() } }}
+                                        /></foreignObject> : renderBoardItem(item)}</g>)}
                                         {selectedItem && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
@@ -1157,7 +1216,12 @@ function App() {
                                             </g>
                                         })()}
                                         {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
-                                        {currentPoints && (drawing || activeTool === 'laser') && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : activeTool === 'highlighter' ? '#f1cd63' : activeTool === 'eraser' ? background : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : activeTool === 'eraser' ? 28 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
+                                        {currentPoints && drawing && activeTool === 'eraser' && (() => {
+                                            const erasePoints = parsePoints(currentPoints)
+                                            const [lastX, lastY] = erasePoints[erasePoints.length - 1]
+                                            return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
+                                        })()}
+                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                     </svg>
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
@@ -1252,7 +1316,7 @@ function App() {
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
             {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p><div className="share-link"><span>{`${window.location.host}${window.location.pathname}?view=student&lesson=${openLesson.id}`}</span><button onClick={() => { const url = `${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`; void navigator.clipboard?.writeText(url); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div><div className="share-permission"><Check size={14} /> Student view is read-only</div></div></div>}
-            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { updateCurrentItems((items) => [...items, { id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }]); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
+            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
             {toast && <div className="toast-message"><Check size={15} />{toast}</div>}
         </div>
     )
