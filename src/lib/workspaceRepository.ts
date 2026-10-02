@@ -6,7 +6,7 @@ const assetBucket = 'lesson-assets'
 
 type StudentRow = { id: string; name: string; position: number }
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
-type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; color: string; tags: string[]; updated_at: string }
+type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; updated_at: string }
 type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[]; background: string }
 type AssetRow = { storage_path: string }
 type AssetWriteRow = { owner_id: string; lesson_id: string; page_id: string; storage_path: string; file_name: string; content_type: string; size_bytes: number }
@@ -67,7 +67,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         client.from('profiles').select('workspace_initialized').eq('id', ownerId).maybeSingle(),
         client.from('students').select('id,name,position').eq('owner_id', ownerId).order('position'),
         client.from('student_folders').select('id,student_id,parent_id,name,position').eq('owner_id', ownerId).order('position'),
-        client.from('lessons').select('id,student_id,folder_id,title,position,cover,color,tags,updated_at').eq('owner_id', ownerId).order('position'),
+        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,updated_at').eq('owner_id', ownerId).order('position'),
         client.from('lesson_pages').select('id,lesson_id,name,position,elements,background').eq('owner_id', ownerId).order('position'),
     ])
     if (profileResult.error) throw new Error(profileResult.error.message)
@@ -131,6 +131,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             updated: formatUpdated(row.updated_at),
             color: row.color,
             cover: row.cover as Lesson['cover'],
+            coverImage: row.cover_image ?? undefined,
             tags: row.tags ?? [],
             kind: 'lesson',
         }
@@ -281,6 +282,7 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
             title: lesson.title,
             position,
             cover: lesson.cover ?? null,
+            cover_image: lesson.coverImage ?? null,
             color: lesson.color,
             tags: lesson.tags ?? [],
         }

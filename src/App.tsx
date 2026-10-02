@@ -231,6 +231,7 @@ function App() {
     const [newTagValue, setNewTagValue] = useState('')
     const [renamingLessonId, setRenamingLessonId] = useState<string | null>(null)
     const [renameValue, setRenameValue] = useState('')
+    const renameCancelledRef = useRef(false)
     const [coverEditorLessonId, setCoverEditorLessonId] = useState<string | null>(null)
     const [renamingTitle, setRenamingTitle] = useState(false)
     const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
@@ -738,11 +739,17 @@ function App() {
     }
 
     function commitLessonRename(lessonId: string) {
-        const title = renameValue.trim()
         setRenamingLessonId(null)
+        if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
+        const title = renameValue.trim()
         if (!title) return
         setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, title } : lesson))
         if (openLesson?.id === lessonId) setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function cancelLessonRename() {
+        renameCancelledRef.current = true
+        setRenamingLessonId(null)
     }
 
     function startRenameOpenLessonTitle() {
@@ -770,11 +777,17 @@ function App() {
 
     function commitOpenLessonTitleRename() {
         setRenamingTitle(false)
+        if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
         if (!openLesson) return
         const title = renameValue.trim()
         if (!title) return
         setLessons((previous) => previous.map((lesson) => lesson.id === openLesson.id ? { ...lesson, title } : lesson))
         setOpenLesson((previous) => previous ? { ...previous, title } : previous)
+    }
+
+    function cancelOpenLessonTitleRename() {
+        renameCancelledRef.current = true
+        setRenamingTitle(false)
     }
 
     function openCoverEditor(lesson: Lesson) {
@@ -1357,7 +1370,7 @@ function App() {
                                                     onBlur={() => commitLessonRename(lesson.id)}
                                                     onKeyDown={(event) => {
                                                         if (event.key === 'Enter') { event.preventDefault(); commitLessonRename(lesson.id) }
-                                                        if (event.key === 'Escape') { event.stopPropagation(); setRenamingLessonId(null) }
+                                                        if (event.key === 'Escape') { event.stopPropagation(); cancelLessonRename() }
                                                     }}
                                                 />
                                             ) : <h2>{lesson.title}{isMockWorkspace && mockLessonIds.has(lesson.id) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
@@ -1397,7 +1410,7 @@ function App() {
                     </aside>
                     <main className="board-main">
                         <div className="board-toolbar">
-                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') setRenamingTitle(false) }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
+                            <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
                             <div className="page-directory-anchor">
                                 <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
                                 {showPageDirectory && <div className="page-directory-menu">{pages.map((page, index) => <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}</div>}
