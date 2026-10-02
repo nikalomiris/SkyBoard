@@ -1,4 +1,4 @@
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 create or replace function public.create_lesson_session(p_lesson_id uuid)
 returns table (session_id uuid, token text, expires_at timestamptz)
@@ -30,11 +30,11 @@ begin
        and owner_id = current_user_id
        and status = 'active';
 
-    raw_token := encode(gen_random_bytes(24), 'hex');
+    raw_token := encode(extensions.gen_random_bytes(24), 'hex');
     new_session_id := gen_random_uuid();
 
     insert into public.lesson_sessions (id, owner_id, lesson_id, token_hash, status, expires_at)
-    values (new_session_id, current_user_id, p_lesson_id, encode(digest(raw_token, 'sha256'), 'hex'), 'active', new_expires_at);
+    values (new_session_id, current_user_id, p_lesson_id, encode(extensions.digest(raw_token, 'sha256'), 'hex'), 'active', new_expires_at);
 
     return query select new_session_id, raw_token, new_expires_at;
 end;
@@ -60,7 +60,7 @@ begin
 
     select * into session_row
       from public.lesson_sessions
-     where token_hash = encode(digest(p_token, 'sha256'), 'hex')
+     where token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
        and status = 'active'
        and expires_at > now();
     if not found then

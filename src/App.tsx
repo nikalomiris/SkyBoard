@@ -22,6 +22,8 @@ type ItemGesture =
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 
 const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
+const MIN_GRID_SIZE = 1
+const MAX_GRID_SIZE = 6
 const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
     { id: 'page', label: 'No thumbnail', tint: '#fffef9' },
     { id: 'vowels', label: 'Sound tiles', tint: lessonColors[0] },
@@ -257,7 +259,7 @@ function App() {
     const [lineDraft, setLineDraft] = useState<{ start: Point; end: Point } | null>(null)
     const [showToolOptions, setShowToolOptions] = useState(false)
     const [editingTextId, setEditingTextId] = useState<string | null>(null)
-    const [historyTick, setHistoryTick] = useState(0)
+    const [, setHistoryTick] = useState(0)
     const stageRef = useRef<HTMLDivElement>(null)
     const itemGestureRef = useRef<ItemGesture | null>(null)
     const historyRef = useRef<Record<string, { past: BoardItem[][]; future: BoardItem[][] }>>({})
@@ -351,7 +353,7 @@ function App() {
     const currentItems = itemsByPage[currentPageKey] ?? []
     const background = backgroundsByPage[currentPageKey] ?? '#fffef9'
     const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
-    const currentHistory = historyTick >= 0 ? historyRef.current[currentPageKey] : undefined
+    const currentHistory = historyRef.current[currentPageKey]
     const canUndo = Boolean(currentHistory?.past.length)
     const canRedo = Boolean(currentHistory?.future.length)
     const isMockWorkspace = !isSupabaseConfigured && !studentView
@@ -1229,8 +1231,8 @@ function App() {
         if (studentView) return
         updateCurrentItems((items) => items.map((item) => {
             if (item.id !== itemId || item.type !== 'grid') return item
-            const rows = Math.max(1, Math.min(6, nextRows))
-            const cols = Math.max(1, Math.min(6, nextCols))
+            const rows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextRows))
+            const cols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextCols))
             const oldCols = item.cols ?? 3
             const values = Array.from({ length: rows * cols }, (_, index) => {
                 const row = Math.floor(index / cols)
