@@ -1911,6 +1911,12 @@ kbd {
     border-color: #386a53;
 }
 
+.grid-size-label {
+    font-size: 10px;
+    color: #6b7a71;
+    margin-right: 4px;
+}
+
 .page-corner-label {
     position: absolute;
     right: 22px;
@@ -2305,6 +2311,29 @@ kbd {
     background: #fafcfa;
     color: #668071;
     font-size: 9px;
+}
+
+.background-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.background-scope button {
+    padding: 6px 8px;
+    border: 1px solid #e4ebe6;
+    border-radius: 4px;
+    background: #fafcfa;
+    color: #668071;
+    font-size: 9px;
+    text-align: left;
+}
+
+.background-scope button.active {
+    border-color: #8fb39c;
+    background: #eef6f0;
+    color: #386a53;
+    font-weight: 600;
 }
 
 .panel-kicker {
