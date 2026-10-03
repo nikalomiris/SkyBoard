@@ -9,11 +9,12 @@ export type BoardItem = { id: string; scale?: number } & (
 )
 
 export type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic' | 'custom'
-export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; kind: 'lesson' }
+export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; isMock?: boolean; kind: 'lesson' }
 export type PageItems = Record<string, BoardItem[]>
 
 export type WorkspaceData = {
     folders: string[]
+    mockStudentFolders: string[]
     lessons: Lesson[]
     itemsByPage: PageItems
     backgroundsByPage: Record<string, string>

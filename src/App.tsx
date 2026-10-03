@@ -32,15 +32,9 @@ const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
     { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
 ]
 const initialLessons: Lesson[] = [
-    { id: '11111111-1111-4111-8111-111111111111', title: 'Short vowels · at family', folder: 'Maya', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], kind: 'lesson' },
-    { id: '22222222-2222-4222-8222-222222222222', title: 'Consonant blends', folder: 'Leo', pages: ['Sound sort', 'Build a word'], updated: 'Yesterday', color: lessonColors[1], kind: 'lesson' },
-    { id: '33333333-3333-4333-8333-333333333333', title: 'Syllable safari', folder: 'Amira', pages: ['Clap it out', 'Word hunt', 'Wrap up'], updated: 'Sep 24', color: lessonColors[2], kind: 'lesson' },
-    { id: '44444444-4444-4444-8444-444444444444', title: 'Magic e · long a', folder: 'Maya', pages: ['Notice', 'Practice'], updated: 'Sep 22', color: lessonColors[3], kind: 'lesson' },
-    { id: '55555555-5555-4555-8555-555555555555', title: 'Sound mapping · short vowels', folder: 'Maya', pages: ['Listen', 'Map', 'Blend'], updated: 'This week', color: lessonColors[0], cover: 'vowels', kind: 'lesson' },
-    { id: '66666666-6666-4666-8666-666666666666', title: 'Retell a story · beginning to end', folder: 'Leo', pages: ['Read', 'Retell'], updated: 'This week', color: lessonColors[1], cover: 'page', kind: 'lesson' },
-    { id: '77777777-7777-4777-8777-777777777777', title: 'Open and closed syllables', folder: 'Amira', pages: ['Sort', 'Read'], updated: 'This week', color: lessonColors[2], cover: 'safari', kind: 'lesson' },
+    { id: '11111111-1111-4111-8111-111111111111', title: 'Short vowels at family', folder: 'Demo student', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], cover: 'vowels', isMock: true, kind: 'lesson' },
 ]
-const folderNamesInitial = ['Maya', 'Leo', 'Amira']
+const folderNamesInitial = ['Demo student']
 const mockLessonIds = new Set(initialLessons.map((lesson) => lesson.id))
 const mockFolderNames = new Set(folderNamesInitial)
 const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
@@ -197,6 +191,7 @@ function App() {
     const [cloudSaveError, setCloudSaveError] = useState('')
     const [lessons, setLessons] = useState(() => isSupabaseConfigured ? [] : readStudentLessons())
     const [folders, setFolders] = useState(() => isSupabaseConfigured ? [] : readStudentFolders())
+    const [mockStudentFolders, setMockStudentFolders] = useState<string[]>([])
     const [activeFolder, setActiveFolder] = useState('All lessons')
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -305,6 +300,7 @@ function App() {
             }
             if (!active) return
             setFolders(workspace.folders)
+            setMockStudentFolders(workspace.mockStudentFolders)
             setLessons(workspace.lessons)
             setItemsByPage(workspace.itemsByPage)
             setBackgroundsByPage(workspace.backgroundsByPage)
@@ -1327,7 +1323,7 @@ function App() {
                         <nav className="folder-list">
                             {getOrderedFolders(folders).map((folder, index) => {
                                 const parent = getFolderParent(folder)
-                                const isMockFolder = isMockWorkspace && !parent && mockFolderNames.has(folder)
+                                const isMockFolder = (!parent && mockStudentFolders.includes(folder)) || (isMockWorkspace && !parent && mockFolderNames.has(folder))
                                 return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggingId) moveLesson(draggingId, folder) }}>
                                     <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span>{isMockFolder && <span className="demo-tag" title="Sample student">Demo</span>}</button>
                                     <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => deleteFolder(folder)}><Trash2 size={14} /> Delete folder</button></div>}</div>
@@ -1375,7 +1371,7 @@ function App() {
                                                         if (event.key === 'Escape') { event.stopPropagation(); cancelLessonRename() }
                                                     }}
                                                 />
-                                            ) : <h2>{lesson.title}{isMockWorkspace && mockLessonIds.has(lesson.id) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
+                                            ) : <h2>{lesson.title}{(lesson.isMock || isMockWorkspace && mockLessonIds.has(lesson.id)) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
                                             <div className="menu-anchor">
                                                 <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
                                                 {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
@@ -1411,7 +1407,7 @@ function App() {
                             <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}
                     </aside>
                     <main className="board-main">
-                        <div className="board-toolbar">
+                        <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
                             <div className="page-directory-anchor">
                                 <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>

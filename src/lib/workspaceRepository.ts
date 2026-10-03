@@ -4,9 +4,9 @@ import type { BoardItem, Lesson, WorkspaceData } from './workspaceTypes'
 const folderSeparator = ' / '
 const assetBucket = 'lesson-assets'
 
-type StudentRow = { id: string; name: string; position: number }
+type StudentRow = { id: string; name: string; position: number; is_mock: boolean }
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
-type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; updated_at: string }
+type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; is_mock: boolean; updated_at: string }
 type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[]; background: string }
 type AssetRow = { storage_path: string }
 type AssetWriteRow = { owner_id: string; lesson_id: string; page_id: string; storage_path: string; file_name: string; content_type: string; size_bytes: number }
@@ -65,9 +65,9 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
     const client = getClient()
     const [profileResult, studentsResult, foldersResult, lessonsResult, pagesResult] = await Promise.all([
         client.from('profiles').select('workspace_initialized').eq('id', ownerId).maybeSingle(),
-        client.from('students').select('id,name,position').eq('owner_id', ownerId).order('position'),
+        client.from('students').select('id,name,position,is_mock').eq('owner_id', ownerId).order('position'),
         client.from('student_folders').select('id,student_id,parent_id,name,position').eq('owner_id', ownerId).order('position'),
-        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,updated_at').eq('owner_id', ownerId).order('position'),
+        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,is_mock,updated_at').eq('owner_id', ownerId).order('position'),
         client.from('lesson_pages').select('id,lesson_id,name,position,elements,background').eq('owner_id', ownerId).order('position'),
     ])
     if (profileResult.error) throw new Error(profileResult.error.message)
@@ -133,6 +133,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             cover: row.cover as Lesson['cover'],
             coverImage: row.cover_image ?? undefined,
             tags: row.tags ?? [],
+            isMock: row.is_mock,
             kind: 'lesson',
         }
     })
@@ -146,6 +147,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
 
     return {
         folders,
+        mockStudentFolders: students.filter((student) => student.is_mock).map((student) => student.name),
         lessons,
         itemsByPage,
         backgroundsByPage,
