@@ -1561,7 +1561,7 @@ kbd {
     flex: 0 0 57px;
     padding: 0 22px;
     display: grid;
-    grid-template-columns: minmax(200px, 1fr) auto auto minmax(250px, 1fr);
+    grid-template-columns: minmax(200px, 1fr) auto minmax(250px, 1fr);
     align-items: center;
     border-bottom: 1px solid #e1e7e3;
     background: #fff;
@@ -1685,78 +1685,6 @@ kbd {
     background: #eef6f0;
     color: #386a53;
     font-weight: 600;
-}
-
-.board-toolbar-center {
-    position: relative;
-    display: flex;
-    justify-content: center;
-}
-
-.ink-picker {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    border: 1px solid #edf0ed;
-    border-radius: 5px;
-    background: #fbfcfb;
-}
-
-.color-swatch {
-    width: 14px;
-    height: 14px;
-    padding: 0;
-    border: 1px solid #ffffff;
-    border-radius: 50%;
-    background: var(--swatch);
-    box-shadow: 0 0 0 1px #dce4df;
-}
-
-.color-swatch.active {
-    box-shadow: 0 0 0 2px white, 0 0 0 3px #66947f;
-}
-
-.tool-option-popover {
-    position: absolute;
-    z-index: 9;
-    top: 35px;
-    left: 50%;
-    transform: translateX(-50%);
-    min-width: 160px;
-    padding: 10px;
-    display: grid;
-    gap: 5px;
-    border: 1px solid #e4eae6;
-    border-radius: 6px;
-    background: white;
-    box-shadow: 0 8px 24px #2f4d3e1a;
-    color: #839087;
-    font-size: 9px;
-}
-
-.tool-option-popover>button {
-    border: 0;
-    background: #f7faf7;
-    padding: 7px;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    color: #50675a;
-    font-size: 10px;
-}
-
-.mini-swatches {
-    display: flex;
-    gap: 7px;
-    padding: 5px;
-}
-
-.mini-swatches button {
-    width: 18px;
-    height: 18px;
-    border: 0;
-    border-radius: 50%;
 }
 
 .board-toolbar-right {
@@ -1940,6 +1868,59 @@ kbd {
     padding: 0 4px;
     font-size: 9px;
     white-space: nowrap;
+}
+
+.grid-text-toolbar,
+.text-font-toolbar {
+    position: absolute;
+    z-index: 4;
+    top: 52px;
+    right: 12px;
+    min-height: 34px;
+    padding: 4px 7px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid #dce7df;
+    border-radius: 5px;
+    background: #fff;
+    box-shadow: 0 3px 12px #344b3c12;
+}
+
+.grid-text-toolbar>span,
+.text-font-toolbar>label {
+    flex: 0 0 auto;
+    color: #728479;
+    font-size: 9px;
+}
+
+.grid-text-toolbar>button {
+    width: 27px;
+    height: 27px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #66816f;
+}
+
+.grid-text-toolbar>button:hover {
+    background: #edf5ef;
+    color: #386a53;
+}
+
+.selection-font-picker {
+    width: 112px;
+    height: 27px;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: 1px solid #dfe8e2;
+    border-radius: 4px;
+    background: #fbfcfb;
+    color: #42594c;
+    font: 9px 'Century Gothic', sans-serif;
 }
 
 .selection-toolbar button:hover {
@@ -2920,6 +2901,27 @@ kbd {
     outline-offset: 1px;
 }
 
+.postit-editor-modal {
+    width: min(420px, 100%);
+}
+
+.postit-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 10px;
+    resize: vertical;
+    border: 1px solid #dfe8e2;
+    border-radius: 4px;
+    background: #fbfcfb;
+    color: #42594c;
+    font: 11px/1.5 'Century Gothic', sans-serif;
+}
+
+.postit-textarea:focus {
+    outline: 2px solid #8fb39b;
+    outline-offset: 1px;
+}
+
 .new-folder-entry {
     margin-top: 9px;
     padding: 10px;
@@ -3274,7 +3276,7 @@ kbd {
 
     .board-toolbar {
         padding: 0 14px;
-        grid-template-columns: minmax(160px, 1fr) auto auto minmax(185px, 1fr);
+        grid-template-columns: minmax(160px, 1fr) auto minmax(185px, 1fr);
     }
 
     .board-toolbar.student-view-toolbar {
@@ -3570,10 +3572,6 @@ kbd {
 
     .board-title>div:nth-child(2) span {
         font-size: 7px;
-    }
-
-    .board-toolbar-center {
-        display: none;
     }
 
     .board-toolbar-right {

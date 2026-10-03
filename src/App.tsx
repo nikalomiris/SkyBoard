@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
     ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
@@ -12,7 +12,7 @@ import AuthScreen from './components/AuthScreen'
 import ProfileSettings from './components/ProfileSettings'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
-import type { BoardItem, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
+import type { BoardItem, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
 type Point = [number, number]
@@ -53,6 +53,13 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'laser', label: 'Laser pointer', icon: Sparkles },
 ]
 const palette = ['#253c37', '#ee7859', '#387c70', '#576fc2', '#e5ac37', '#bc6c9a']
+const textFontOptions = [
+    { label: 'Century Gothic', value: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" },
+    { label: 'Manrope', value: "'Manrope', sans-serif" },
+    { label: 'Georgia', value: 'Georgia, serif' },
+    { label: 'DM Mono', value: "'DM Mono', monospace" },
+]
+const defaultTextFont = textFontOptions[0].value
 
 function id() {
     return crypto.randomUUID()
@@ -212,6 +219,7 @@ function App() {
     const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+    const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
     const [ink, setInk] = useState(palette[0])
     const [backgroundsByPage, setBackgroundsByPage] = useState<Record<string, string>>(() => isSupabaseConfigured ? {} : readStored('skyboard:backgrounds', {}))
     const [backgroundScope, setBackgroundScope] = useState<'current' | 'all'>('current')
@@ -224,6 +232,7 @@ function App() {
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
     const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
+    const [postitDraft, setPostitDraft] = useState<{ left: number; top: number; text: string } | null>(null)
     const [tagEditorLessonId, setTagEditorLessonId] = useState<string | null>(null)
     const [newTagValue, setNewTagValue] = useState('')
     const [renamingLessonId, setRenamingLessonId] = useState<string | null>(null)
@@ -349,6 +358,9 @@ function App() {
     const currentItems = itemsByPage[currentPageKey] ?? []
     const background = backgroundsByPage[currentPageKey] ?? '#fffef9'
     const selectedItem = currentItems.find((item) => item.id === selectedItemId) ?? null
+    const selectedGridCellStyle = selectedItem?.type === 'grid' && activeGridCell?.itemId === selectedItem.id
+        ? selectedItem.cellStyles?.[activeGridCell.index]
+        : undefined
     const currentHistory = historyRef.current[currentPageKey]
     const canUndo = Boolean(currentHistory?.past.length)
     const canRedo = Boolean(currentHistory?.future.length)
@@ -990,18 +1002,75 @@ function App() {
     }
 
     function setSelectedTextColor(color: string) {
-        if (!selectedItem || selectedItem.type !== 'text') return
-        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, color } : item))
+        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
+        if (selectedItem.type === 'grid') {
+            updateSelectedGridCellStyle((style) => ({ ...style, color }))
+            return
+        }
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id) return item
+            return item.type === 'text' ? { ...item, color } : item
+        }))
+    }
+
+    function setSelectedItemColor(color: string) {
+        if (!selectedItem) {
+            setInk(color)
+            return
+        }
+        if (selectedItem.type === 'text' || selectedItem.type === 'grid') {
+            setSelectedTextColor(color)
+            return
+        }
+        if (selectedItem.type !== 'stroke' && selectedItem.type !== 'shape' && selectedItem.type !== 'note') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && (item.type === 'stroke' || item.type === 'shape' || item.type === 'note') ? { ...item, color } : item))
+    }
+
+    function renderColorPicker(label: string, selectedColor: string, onSelect: (color: string) => void): ReactNode {
+        return <div className="selection-text-colors" aria-label={`${label} color`}>
+            {palette.map((color) => <button key={color} className={selectedColor === color ? 'active' : ''} style={{ backgroundColor: color }} title={`${label} color ${color}`} aria-label={`${label} color ${color}`} onClick={() => onSelect(color)} />)}
+        </div>
+    }
+
+    function updateSelectedGridCellStyle(transform: (style: GridCellStyle, grid: Extract<BoardItem, { type: 'grid' }>) => GridCellStyle) {
+        if (!selectedItem || selectedItem.type !== 'grid' || activeGridCell?.itemId !== selectedItem.id) return
+        const cellIndex = activeGridCell.index
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id || item.type !== 'grid') return item
+            const cellStyles = [...(item.cellStyles ?? [])]
+            cellStyles[cellIndex] = transform(cellStyles[cellIndex] ?? {}, item)
+            return { ...item, cellStyles }
+        }))
     }
 
     function adjustSelectedTextSize(delta: number) {
-        if (!selectedItem || selectedItem.type !== 'text') return
-        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, size: Math.max(10, Math.min(96, item.size + delta)) } : item))
+        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
+        if (selectedItem.type === 'grid') {
+            updateSelectedGridCellStyle((style, grid) => ({ ...style, fontSize: Math.max(10, Math.min(96, (style.fontSize ?? grid.fontSize ?? 20) + delta)) }))
+            return
+        }
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id) return item
+            return item.type === 'text' ? { ...item, size: Math.max(10, Math.min(96, item.size + delta)) } : item
+        }))
+    }
+
+    function setSelectedFontFamily(fontFamily: string) {
+        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
+        if (selectedItem.type === 'grid') {
+            updateSelectedGridCellStyle((style) => ({ ...style, fontFamily }))
+            return
+        }
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id) return item
+            return item.type === 'text' ? { ...item, fontFamily } : item
+        }))
     }
 
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (studentView || !stageRef.current) return
         const { stageX, stageY } = coordinates(event)
+        if (activeTool === 'text' || activeTool === 'postit') return
         if (activeTool === 'element-eraser') {
             const hit = currentItems.find((item) => {
                 if (item.type === 'stroke') return item.points.trim().split(/\s+/).some((point) => {
@@ -1026,19 +1095,8 @@ function App() {
             if (hit) updateCurrentItems((items) => items.filter((item) => item.id !== hit.id))
             return
         }
-        if (activeTool === 'postit') {
-            const text = window.prompt('Add a note', 'Remember this sound!')
-            if (text) addBoardItem({ id: id(), type: 'note', left: stageX / 10, top: stageY / 6.2, text })
-            return
-        }
-        if (activeTool === 'text') {
-            const newItem: Extract<BoardItem, { type: 'text' }> = { id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text: '', color: ink, size: 22 }
-            addBoardItem(newItem)
-            setEditingTextId(newItem.id)
-            return
-        }
         if (activeTool === 'grid') {
-            addBoardItem({ id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill('') })
+            addBoardItem({ id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill(''), color: ink })
             return
         }
         if (activeTool === 'shape') {
@@ -1152,6 +1210,19 @@ function App() {
         }
     }
 
+    function onStageClick(event: ReactMouseEvent<HTMLElement>) {
+        if (studentView || !stageRef.current) return
+        const { stageX, stageY } = coordinates(event)
+        if (activeTool === 'postit') {
+            setPostitDraft({ left: stageX / 10, top: stageY / 6.2, text: 'Remember this sound!' })
+            return
+        }
+        if (activeTool !== 'text') return
+        const newItem: Extract<BoardItem, { type: 'text' }> = { id: id(), type: 'text', left: stageX / 10, top: stageY / 6.2, text: '', color: ink, size: 22, fontFamily: defaultTextFont }
+        addBoardItem(newItem)
+        setEditingTextId(newItem.id)
+    }
+
     function setBlendToken(rowIndex: number, tokenIndex: number, value: string) {
         setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.map((token, tIndex) => tIndex === tokenIndex ? value : token) : row))
     }
@@ -1225,10 +1296,11 @@ function App() {
 
     function resizeGrid(itemId: string, nextRows: number, nextCols: number) {
         if (studentView) return
+        const rows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextRows))
+        const cols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextCols))
+        setActiveGridCell((current) => current?.itemId === itemId ? { ...current, index: Math.min(current.index, rows * cols - 1) } : current)
         updateCurrentItems((items) => items.map((item) => {
             if (item.id !== itemId || item.type !== 'grid') return item
-            const rows = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextRows))
-            const cols = Math.max(MIN_GRID_SIZE, Math.min(MAX_GRID_SIZE, nextCols))
             const oldCols = item.cols ?? 3
             const values = Array.from({ length: rows * cols }, (_, index) => {
                 const row = Math.floor(index / cols)
@@ -1236,7 +1308,12 @@ function App() {
                 const oldIndex = row * oldCols + col
                 return item.values[oldIndex] ?? ''
             })
-            return { ...item, rows, cols, values }
+            const cellStyles = item.cellStyles && Array.from({ length: rows * cols }, (_, index) => {
+                const row = Math.floor(index / cols)
+                const col = index % cols
+                return item.cellStyles?.[row * oldCols + col] ?? {}
+            })
+            return { ...item, rows, cols, values, ...(cellStyles ? { cellStyles } : {}) }
         }))
     }
 
@@ -1250,11 +1327,47 @@ function App() {
         openNewLessonDialog()
     }
 
+    function renderSelectedItemToolbar(): ReactNode {
+        if (studentView || !selectedItem) return null
+        let colorControls: ReactNode = null
+        if (selectedItem.type === 'text') colorControls = renderColorPicker('Text', selectedItem.color, setSelectedTextColor)
+        else if (selectedItem.type === 'grid' && activeGridCell?.itemId === selectedItem.id) {
+            colorControls = renderColorPicker('Cell text', selectedGridCellStyle?.color ?? selectedItem.color ?? '#405f51', setSelectedTextColor)
+        } else if (selectedItem.type === 'stroke' || selectedItem.type === 'shape' || selectedItem.type === 'note') {
+            colorControls = renderColorPicker('Selected item', selectedItem.color ?? '#253c37', setSelectedItemColor)
+        }
+
+        return <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+            <span>Selected element</span>
+            {colorControls}
+            {selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}
+            {selectedItem.type === 'text' && <><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}
+            {selectedItem.type === 'grid' && <><span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span><button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button><button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button><button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button><button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button></>}
+            <button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button>
+            <button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button>
+            <button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button>
+        </div>
+    }
+
+    function renderToolColorToolbar(): ReactNode {
+        if (studentView || selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text', 'grid'].includes(activeTool)) return null
+        const toolLabel = activeTool === 'shape' ? 'New shape' : activeTool === 'text' ? 'New text' : activeTool === 'grid' ? 'New grid' : 'Ink'
+        return <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+            <span>{toolLabel}</span>
+            {activeTool === 'shape' && showToolOptions && <>
+                <button className={selectedShape === 'circle' ? 'active' : ''} aria-label="Circle shape" title="Circle" aria-pressed={selectedShape === 'circle'} onClick={() => setSelectedShape('circle')}><Circle size={15} /></button>
+                <button className={selectedShape === 'rectangle' ? 'active' : ''} aria-label="Rectangle shape" title="Rectangle" aria-pressed={selectedShape === 'rectangle'} onClick={() => setSelectedShape('rectangle')}><Shapes size={15} /></button>
+                <button className={selectedShape === 'line' ? 'active' : ''} aria-label="Line shape" title="Line" aria-pressed={selectedShape === 'line'} onClick={() => setSelectedShape('line')}><MoveRight size={15} /></button>
+            </>}
+            {renderColorPicker('Ink', ink, setInk)}
+        </div>
+    }
+
     function renderBoardItem(item: BoardItem): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
-        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily="'Century Gothic', CenturyGothic, AppleGothic, sans-serif">{item.text}</text>
-        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky">{item.text}</div></foreignObject>
+        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
+        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? '#ffebaa' }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
@@ -1276,7 +1389,10 @@ function App() {
             return (
                 <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
                     <div className="board-grid" data-grid-id={item.id} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
-                        {item.values.map((value, index) => <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />)}
+                        {item.values.map((value, index) => {
+                            const cellStyle = item.cellStyles?.[index]
+                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${(cellStyle?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
+                        })}
                     </div>
                 </foreignObject>
             )
@@ -1402,7 +1518,7 @@ function App() {
                     <aside className="tool-rail" aria-label="Whiteboard tools">
                         {!studentView && <><button className="rail-back" onClick={() => setOpenLesson(null)} title="Back to library"><ArrowLeft size={18} /></button>
                             <div className="rail-divider" />
-                            {toolList.map(({ id: toolId, label, icon: Icon }) => <button key={toolId} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); setShowToolOptions(toolId === 'shape' || toolId === 'pen' || toolId === 'brush' || toolId === 'highlighter') }}><Icon size={19} /></button>)}
+                            {toolList.map(({ id: toolId, label, icon: Icon }) => <button key={toolId} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
                             <div className="rail-spacer" />
                             <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}
                     </aside>
@@ -1413,18 +1529,23 @@ function App() {
                                 <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
                                 {showPageDirectory && <div className="page-directory-menu">{pages.map((page, index) => <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}</div>}
                             </div>
-                            {!studentView && <div className="board-toolbar-center">
-                                <div className="ink-picker">{palette.map((color) => <button key={color} className={`color-swatch ${ink === color ? 'active' : ''}`} style={{ '--swatch': color } as React.CSSProperties} onClick={() => setInk(color)} aria-label={`Choose ${color} ink`} title={`Choose ${color} ink`} />)}</div>
-                                {showToolOptions && <div className="tool-option-popover"><span>{activeTool === 'shape' ? 'Choose a shape' : 'Ink color'}</span>{activeTool === 'shape' ? <><button onClick={() => { setSelectedShape('circle'); setActiveTool('shape'); setShowToolOptions(false) }}><Circle size={15} /> Circle</button><button onClick={() => { setSelectedShape('rectangle'); setActiveTool('shape'); setShowToolOptions(false) }}><Shapes size={15} /> Rectangle</button><button onClick={() => { setSelectedShape('line'); setActiveTool('shape'); setShowToolOptions(false) }}><MoveRight size={15} /> Line</button></> : <div className="mini-swatches">{palette.map((color) => <button key={color} style={{ backgroundColor: color }} onClick={() => { setInk(color); setShowToolOptions(false) }} aria-label={`Choose ${color}`} title={`Choose ${color}`} />)}</div>}</div>}
-                            </div>}
                             <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><ChevronRight size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div>{blendRows.map((row, rowIndex) => <div className="blend-row" key={rowIndex}><div className="blend-track">{row.map((token, tokenIndex) => <div className={`blend-token-wrap ${tokenIndex > 0 ? 'with-dot' : ''}`} key={tokenIndex}><input className="blend-token" value={token} onChange={(event) => setBlendToken(rowIndex, tokenIndex, event.target.value)} aria-label={`Row ${rowIndex + 1} sound ${tokenIndex + 1}`} />{row.length > 1 && <button className="blend-token-remove" aria-label={`Remove sound ${tokenIndex + 1}`} title="Remove sound" onClick={() => removeBlendToken(rowIndex, tokenIndex)}><X size={10} /></button>}</div>)}<button className="blend-add-token" aria-label="Add a sound" title="Add a sound" onClick={() => addBlendToken(rowIndex)}><Plus size={13} /></button></div><div className="blend-word">{row.map((token, tokenIndex) => <span key={tokenIndex}>{token}</span>)}<b>{row.join('')}</b></div><div className="blend-controls"><button onClick={() => playBlendRow(rowIndex)}><AudioLines size={14} /> Play sounds</button>{blendRows.length > 1 && <button onClick={() => removeBlendRow(rowIndex)}><Trash2 size={14} /> Remove row</button>}</div></div>)}<button className="blend-add-row" onClick={addBlendRow}><Plus size={14} /> New row</button></div>}
-                            {!studentView && selectedItem && <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}><span>Selected element</span>{selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}{selectedItem.type === 'text' && <><div className="selection-text-colors">{palette.map((color) => <button key={color} className={selectedItem.color === color ? 'active' : ''} style={{ backgroundColor: color }} title={`Text color ${color}`} aria-label={`Text color ${color}`} onClick={() => setSelectedTextColor(color)} />)}</div><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}{selectedItem.type === 'grid' && <><span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span><button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button><button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button><button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button><button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button></>}<button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button><button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button><button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button></div>}
+                            {renderSelectedItemToolbar()}
+                            {renderToolColorToolbar()}
+                            {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                                <span>Cell {activeGridCell.index + 1}</span>
+                                <span>{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
+                                <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
+                                <select className="selection-font-picker" value={selectedGridCellStyle?.fontFamily ?? selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Cell text font" title="Cell text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
+                            </div>}
+                            {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select></div>}
                             <div className="board-page-area">
-                                <div className="page-paper" ref={stageRef} style={{ background }} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
+                                <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
                                         {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } beginItemGesture(event, item) }} onDoubleClick={() => { if (item.type === 'text') { setSelectedItemId(item.id); setEditingTextId(item.id) } }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, item.text.length * item.size * 0.62 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
@@ -1432,9 +1553,14 @@ function App() {
                                             autoFocus
                                             value={item.text}
                                             placeholder="Type here…"
-                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" }}
+                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: item.fontFamily ?? defaultTextFont }}
                                             onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
-                                            onBlur={() => { setEditingTextId(null); if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id)) }}
+                                            onBlur={(event) => {
+                                                const nextFocus = event.relatedTarget
+                                                if (nextFocus instanceof HTMLElement && nextFocus.closest('.selection-toolbar, .text-font-toolbar')) return
+                                                setEditingTextId(null)
+                                                if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id))
+                                            }}
                                             onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.currentTarget.blur() } }}
                                         /></foreignObject> : renderBoardItem(item)}</g>)}
                                         {selectedItem && (() => {
@@ -1466,6 +1592,7 @@ function App() {
                     </main>
                 </div>
             )}
+            {postitDraft && <div className="modal-scrim" onClick={() => setPostitDraft(null)}><form className="share-modal postit-editor-modal" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setPostitDraft(null) } }} onSubmit={(event) => { event.preventDefault(); const text = postitDraft.text.trim(); if (!text) return; addBoardItem({ id: id(), type: 'note', left: postitDraft.left, top: postitDraft.top, text }); setPostitDraft(null) }}><button type="button" className="modal-close" onClick={() => setPostitDraft(null)} aria-label="Close note editor"><X size={18} /></button><div className="share-modal-icon"><StickyNote size={20} /></div><h2>Add a sticky note</h2><p>Write a reminder for this lesson page.</p><label className="new-lesson-field">Note text<textarea className="postit-textarea" autoFocus value={postitDraft.text} onChange={(event) => setPostitDraft((draft) => draft ? { ...draft, text: event.target.value } : draft)} /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setPostitDraft(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!postitDraft.text.trim()}><StickyNote size={15} /> Add note</button></div></form></div>}
             {showNewLesson && (
                 <div className="modal-scrim" onClick={() => setShowNewLesson(false)}>
                     <form
