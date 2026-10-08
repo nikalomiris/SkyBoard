@@ -9,36 +9,25 @@ import {
     RotateCw, StickyNote, Tag, Trash2, Type, Users, X,
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
+import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import {
+    defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
+    folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
+    mockFolderNames, mockLessonIds, palette, readStudentFolders, readStudentLessons, readStored,
+    textFontOptions,
+} from './lib/workspaceUtils'
+import type { Tool } from './lib/workspaceUtils'
+import type { ItemBounds, Point } from './lib/boardGeometry'
 import type { BoardItem, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
-type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
-type Point = [number, number]
-type ItemBounds = { left: number; top: number; width: number; height: number }
 type ItemGesture =
     | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 
-const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
-const MIN_GRID_SIZE = 1
-const MAX_GRID_SIZE = 6
-const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
-    { id: 'page', label: 'No thumbnail', tint: '#fffef9' },
-    { id: 'vowels', label: 'Sound tiles', tint: lessonColors[0] },
-    { id: 'blends', label: 'Word blends', tint: lessonColors[1] },
-    { id: 'safari', label: 'Syllable safari', tint: lessonColors[2] },
-    { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
-]
-const initialLessons: Lesson[] = [
-    { id: '11111111-1111-4111-8111-111111111111', title: 'Short vowels at family', folder: 'Demo student', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], cover: 'vowels', isMock: true, kind: 'lesson' },
-]
-const folderNamesInitial = ['Demo student']
-const mockLessonIds = new Set(initialLessons.map((lesson) => lesson.id))
-const mockFolderNames = new Set(folderNamesInitial)
-const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
-const folderSeparator = ' / '
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -52,136 +41,6 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'grid', label: 'Word grid', icon: Grid2X2 },
     { id: 'laser', label: 'Laser pointer', icon: Sparkles },
 ]
-const palette = ['#253c37', '#ee7859', '#387c70', '#576fc2', '#e5ac37', '#bc6c9a']
-const textFontOptions = [
-    { label: 'Century Gothic', value: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" },
-    { label: 'Manrope', value: "'Manrope', sans-serif" },
-    { label: 'Georgia', value: 'Georgia, serif' },
-    { label: 'DM Mono', value: "'DM Mono', monospace" },
-]
-const defaultTextFont = textFontOptions[0].value
-
-function id() {
-    return crypto.randomUUID()
-}
-
-function parsePoints(points: string): Point[] {
-    return points.trim().split(/\s+/).filter(Boolean).map((point) => point.split(',').map(Number) as Point)
-}
-
-function pointToSegmentDistance(point: Point, start: Point, end: Point) {
-    const deltaX = end[0] - start[0]
-    const deltaY = end[1] - start[1]
-    const lengthSquared = deltaX * deltaX + deltaY * deltaY
-    if (!lengthSquared) return Math.hypot(point[0] - start[0], point[1] - start[1])
-    const ratio = Math.max(0, Math.min(1, ((point[0] - start[0]) * deltaX + (point[1] - start[1]) * deltaY) / lengthSquared))
-    return Math.hypot(point[0] - (start[0] + ratio * deltaX), point[1] - (start[1] + ratio * deltaY))
-}
-
-function rotatePoint(point: Point, center: Point, degrees: number): Point {
-    const radians = degrees * Math.PI / 180
-    const deltaX = point[0] - center[0]
-    const deltaY = point[1] - center[1]
-    return [center[0] + deltaX * Math.cos(radians) - deltaY * Math.sin(radians), center[1] + deltaX * Math.sin(radians) + deltaY * Math.cos(radians)]
-}
-
-function boundsForPoints(points: Point[]): ItemBounds {
-    const xs = points.map(([pointX]) => pointX)
-    const ys = points.map(([, pointY]) => pointY)
-    const left = Math.min(...xs)
-    const top = Math.min(...ys)
-    return { left, top, width: Math.max(1, Math.max(...xs) - left), height: Math.max(1, Math.max(...ys) - top) }
-}
-
-function segmentDistance(firstStart: Point, firstEnd: Point, secondStart: Point, secondEnd: Point) {
-    const orientation = (start: Point, end: Point, point: Point) => (end[0] - start[0]) * (point[1] - start[1]) - (end[1] - start[1]) * (point[0] - start[0])
-    const firstSideA = orientation(firstStart, firstEnd, secondStart)
-    const firstSideB = orientation(firstStart, firstEnd, secondEnd)
-    const secondSideA = orientation(secondStart, secondEnd, firstStart)
-    const secondSideB = orientation(secondStart, secondEnd, firstEnd)
-    const onSegment = (start: Point, end: Point, point: Point) => point[0] >= Math.min(start[0], end[0]) && point[0] <= Math.max(start[0], end[0]) && point[1] >= Math.min(start[1], end[1]) && point[1] <= Math.max(start[1], end[1])
-    if (firstSideA === 0 && onSegment(firstStart, firstEnd, secondStart) ||
-        firstSideB === 0 && onSegment(firstStart, firstEnd, secondEnd) ||
-        secondSideA === 0 && onSegment(secondStart, secondEnd, firstStart) ||
-        secondSideB === 0 && onSegment(secondStart, secondEnd, firstEnd) ||
-        (firstSideA < 0) !== (firstSideB < 0) && (secondSideA < 0) !== (secondSideB < 0)) return 0
-    return Math.min(
-        pointToSegmentDistance(firstStart, secondStart, secondEnd),
-        pointToSegmentDistance(firstEnd, secondStart, secondEnd),
-        pointToSegmentDistance(secondStart, firstStart, firstEnd),
-        pointToSegmentDistance(secondEnd, firstStart, firstEnd),
-    )
-}
-
-function polylinesWithinDistance(first: Point[], second: Point[], distance: number) {
-    const firstSegments = first.length === 1 ? [[first[0], first[0]]] : first.slice(1).map((point, index) => [first[index], point])
-    const secondSegments = second.length === 1 ? [[second[0], second[0]]] : second.slice(1).map((point, index) => [second[index], point])
-    return firstSegments.some(([firstStart, firstEnd]) => secondSegments.some(([secondStart, secondEnd]) => segmentDistance(firstStart, firstEnd, secondStart, secondEnd) <= distance))
-}
-
-function readStored<T>(key: string, fallback: T): T {
-    try {
-        const value = window.localStorage.getItem(key)
-        return value ? JSON.parse(value) as T : fallback
-    } catch {
-        return fallback
-    }
-}
-
-function readStudentFolders() {
-    if (isSupabaseConfigured) return []
-    return readStored<string[]>('skyboard:folders', folderNamesInitial).map((folder) => legacyFolderNames[folder] ?? folder)
-}
-
-function getFolderParent(folder: string) {
-    const separatorIndex = folder.lastIndexOf(folderSeparator)
-    return separatorIndex < 0 ? null : folder.slice(0, separatorIndex)
-}
-
-function getFolderName(folder: string) {
-    const separatorIndex = folder.lastIndexOf(folderSeparator)
-    return separatorIndex < 0 ? folder : folder.slice(separatorIndex + folderSeparator.length)
-}
-
-function folderIsWithin(folder: string, parent: string) {
-    return folder === parent || folder.startsWith(`${parent}${folderSeparator}`)
-}
-
-function getOrderedFolders(folders: string[]) {
-    return folders.filter((folder) => !getFolderParent(folder)).flatMap((parent) => [
-        parent,
-        ...folders.filter((folder) => getFolderParent(folder) === parent),
-    ])
-}
-
-function readStudentLessons() {
-    if (isSupabaseConfigured) return []
-    const seedKey = 'skyboard:mock-lessons:v1'
-    let lessons = readStored<Lesson[]>('skyboard:lessons', initialLessons)
-    if (window.localStorage.getItem(seedKey) !== 'done') {
-        const existingIds = new Set(lessons.map((lesson) => lesson.id))
-        const missingMocks = initialLessons.filter((lesson) => lesson.id.startsWith('mock-') && !existingIds.has(lesson.id))
-        lessons = [...lessons, ...missingMocks]
-        if (missingMocks.length) window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons))
-        window.localStorage.setItem(seedKey, 'done')
-    }
-    return lessons.map((lesson) => ({
-        ...lesson,
-        folder: legacyFolderNames[lesson.folder] ?? lesson.folder,
-    }))
-}
-
-function Thumb({ kind, tint }: { kind: string; tint: string }) {
-    return (
-        <div className={`lesson-thumb ${kind}`} style={{ backgroundColor: tint }} aria-hidden="true">
-            {kind === 'blends' ? <><span className="thumb-line short" /><span className="thumb-chip">sh</span><span className="thumb-chip peach">i</span><span className="thumb-chip green">p</span><span className="thumb-line" /></> :
-                kind === 'safari' ? <><div className="thumb-sun" /><span className="thumb-word">syllables</span><div className="thumb-hills" /></> :
-                    kind === 'magic' ? <><span className="thumb-letter">a</span><span className="thumb-arrow">→</span><span className="thumb-letter accent">ā</span><span className="thumb-star">✳</span></> :
-                        <><span className="thumb-title">at</span><span className="thumb-chip">c</span><span className="thumb-chip peach">a</span><span className="thumb-chip green">t</span><span className="thumb-underline" /></>}
-        </div>
-    )
-}
-
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
     const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
@@ -385,6 +244,7 @@ function App() {
         const timeout = window.setTimeout(() => {
             setCloudSaveStatus('saving')
             setCloudSaveError('')
+            // Serialize writes so an older save cannot finish after and overwrite a newer workspace snapshot.
             workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage, backgroundsByPage))
             void workspaceSaveQueue.current.then(() => {
                 if (workspaceSaveVersion.current === version) setCloudSaveStatus('saved')
@@ -550,74 +410,6 @@ function App() {
         setItemsByPage((previous) => ({ ...previous, [currentPageKey]: nextState }))
         setSelectedItemId(null)
         setHistoryTick((tick) => tick + 1)
-    }
-
-    function getLineEndpoints(item: Extract<BoardItem, { type: 'shape' }>): { start: Point; end: Point } {
-        const scale = item.scale ?? 1
-        let start: Point
-        let end: Point
-        if (item.endX === undefined || item.endY === undefined) {
-            const centerX = item.left * 10
-            const centerY = item.top * 6.2
-            start = [centerX - 48 * scale, centerY]
-            end = [centerX + 48 * scale, centerY]
-        } else {
-            start = [item.left * 10, item.top * 6.2]
-            end = [start[0] + (item.endX - item.left) * 10 * scale, start[1] + (item.endY - item.top) * 6.2 * scale]
-        }
-        const center: Point = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2]
-        return { start: rotatePoint(start, center, item.rotation ?? 0), end: rotatePoint(end, center, item.rotation ?? 0) }
-    }
-
-    function getItemBounds(item: BoardItem): ItemBounds {
-        const scale = item.scale ?? 1
-        if (item.type === 'stroke') {
-            const points = parsePoints(item.points)
-            const xs = points.map(([pointX]) => pointX)
-            const ys = points.map(([, pointY]) => pointY)
-            const left = Math.min(...xs)
-            const top = Math.min(...ys)
-            return { left, top, width: Math.max(1, Math.max(...xs) - left), height: Math.max(1, Math.max(...ys) - top) }
-        }
-        const left = item.left * 10
-        const top = item.top * 6.2
-        if (item.type === 'shape' && item.shape === 'circle') return { left: left - 46 * scale, top: top - 46 * scale, width: 92 * scale, height: 92 * scale }
-        if (item.type === 'shape' && item.shape === 'line') {
-            const { start, end } = getLineEndpoints(item)
-            const margin = 5 * scale
-            const boundsLeft = Math.min(start[0], end[0]) - margin
-            const boundsTop = Math.min(start[1], end[1]) - margin
-            return { left: boundsLeft, top: boundsTop, width: Math.max(1, Math.abs(end[0] - start[0]) + margin * 2), height: Math.max(1, Math.abs(end[1] - start[1]) + margin * 2) }
-        }
-        if (item.type === 'shape') {
-            const width = 125 * scale
-            const height = 78 * scale
-            const center: Point = [left + width / 2, top + height / 2]
-            const corners: Point[] = [[left, top], [left + width, top], [left + width, top + height], [left, top + height]]
-            return boundsForPoints(corners.map((point) => rotatePoint(point, center, item.rotation ?? 0)))
-        }
-        if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
-        const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
-        const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
-        return { left, top, width: width * scale, height: height * scale }
-    }
-
-    function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): BoardItem {
-        if (item.type === 'stroke') return { ...item, points: parsePoints(item.points).map(([pointX, pointY]) => `${pointX + deltaX},${pointY + deltaY}`).join(' ') }
-        if (item.type === 'shape' && item.shape === 'line' && item.endX !== undefined && item.endY !== undefined) {
-            return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2, endX: item.endX + deltaX / 10, endY: item.endY + deltaY / 6.2 }
-        }
-        return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2 }
-    }
-
-    function resizeBoardItem(item: BoardItem, factor: number): BoardItem {
-        const scale = Math.max(0.35, Math.min(3, (item.scale ?? 1) * factor))
-        if (item.type !== 'stroke') return { ...item, scale }
-        const bounds = getItemBounds(item)
-        return {
-            ...item,
-            points: parsePoints(item.points).map(([pointX, pointY]) => `${bounds.left + (pointX - bounds.left) * factor},${bounds.top + (pointY - bounds.top) * factor}`).join(' '),
-        }
     }
 
     function addBoardItem(item: BoardItem) {
@@ -1471,7 +1263,7 @@ function App() {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
                                 const cover = lesson.cover ?? legacyCover
                                 return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <Thumb kind={cover} tint={lesson.color} />}
+                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info">
                                         <div className="lesson-name-line">
                                             {renamingLessonId === lesson.id ? (
@@ -1659,7 +1451,7 @@ function App() {
                             <div className="cover-options">
                                 {lessonCoverOptions.map((option) => (
                                     <button key={option.id} type="button" className={`cover-option ${newLessonCover === option.id ? 'selected' : ''}`} aria-pressed={newLessonCover === option.id} onClick={() => setNewLessonCover(option.id)}>
-                                        {option.id === 'page' ? <div className="lesson-thumb page-preview cover-option-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none" /></div> : <Thumb kind={option.id} tint={option.tint} />}
+                                        {option.id === 'page' ? <div className="lesson-thumb page-preview cover-option-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none" /></div> : <LessonThumbnail kind={option.id} tint={option.tint} />}
                                         <span>{option.label}</span>
                                     </button>
                                 ))}
