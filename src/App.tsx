@@ -54,6 +54,7 @@ function App() {
     const [workspaceError, setWorkspaceError] = useState('')
     const [workspaceRetry, setWorkspaceRetry] = useState(0)
     const [cloudSaveStatus, setCloudSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
+    const [savedNoticeVisible, setSavedNoticeVisible] = useState(true)
     const [cloudSaveError, setCloudSaveError] = useState('')
     const [lessons, setLessons] = useState(() => isSupabaseConfigured ? [] : readStudentLessons())
     const [folders, setFolders] = useState(() => isSupabaseConfigured ? [] : readStudentFolders())
@@ -238,6 +239,11 @@ function App() {
     useEffect(() => {
         try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { notify('Clipboard is too large to keep after a refresh') }
     }, [clipboardPages])
+    useEffect(() => {
+        if (cloudSaveStatus !== 'saved') return setSavedNoticeVisible(true)
+        const timeout = window.setTimeout(() => setSavedNoticeVisible(false), 3000)
+        return () => window.clearTimeout(timeout)
+    }, [cloudSaveStatus])
     useEffect(() => {
         document.querySelector('.page-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }, [pageIndex, pages.length])
@@ -1274,7 +1280,7 @@ function App() {
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
                 </div>
             </header>
-            {authSession && !studentView && <div className={`cloud-storage-notice ${cloudSaveStatus === 'error' ? 'error' : ''}`} role="status">{cloudSaveStatus === 'saving' ? 'Saving your workspace…' : cloudSaveStatus === 'error' ? `Cloud save failed: ${cloudSaveError}` : `Saved to Supabase · ${authSession.user.email}`}</div>}
+            {authSession && !studentView && (cloudSaveStatus !== 'saved' || savedNoticeVisible) && <div className={`cloud-storage-notice ${cloudSaveStatus === 'error' ? 'error' : ''}`} role="status">{cloudSaveStatus === 'saving' ? 'Saving your workspace…' : cloudSaveStatus === 'error' ? `Cloud save failed: ${cloudSaveError}` : `Saved to Supabase · ${authSession.user.email}`}</div>}
 
             {!openLesson ? (
                 <div className="library-layout">
