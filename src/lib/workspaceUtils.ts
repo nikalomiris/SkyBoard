@@ -22,6 +22,7 @@ export const mockFolderNames = new Set(folderNamesInitial)
 export const legacyFolderNames: Record<string, string> = { Phonics: 'Maya', Fluency: 'Leo', 'Word study': 'Amira' }
 export const folderSeparator = ' / '
 
+export const notePalette = ['#fff3b0', '#ffd9de', '#d8f3e4', '#d6e8ff', '#e6dcff', '#ffe4cc']
 export const palette = ['#253c37', '#ee7859', '#387c70', '#576fc2', '#e5ac37', '#bc6c9a']
 export const textFontOptions = [
     { label: 'Century Gothic', value: "'Century Gothic', CenturyGothic, AppleGothic, sans-serif" },

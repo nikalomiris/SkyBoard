@@ -17,7 +17,7 @@ import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorksp
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
     folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
-    mockFolderNames, mockLessonIds, palette, readStudentFolders, readStudentLessons, readStored,
+    mockFolderNames, mockLessonIds, notePalette, palette, readStudentFolders, readStudentLessons, readStored,
     textFontOptions,
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
@@ -879,9 +879,9 @@ function App() {
         updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && (item.type === 'stroke' || item.type === 'shape' || item.type === 'note') ? { ...item, color } : item))
     }
 
-    function renderColorPicker(label: string, selectedColor: string, onSelect: (color: string) => void): ReactNode {
+    function renderColorPicker(label: string, selectedColor: string, onSelect: (color: string) => void, colors: string[] = palette): ReactNode {
         return <div className="selection-text-colors" aria-label={`${label} color`}>
-            {palette.map((color) => <button key={color} className={selectedColor === color ? 'active' : ''} style={{ backgroundColor: color }} title={`${label} color ${color}`} aria-label={`${label} color ${color}`} onClick={() => onSelect(color)} />)}
+            {colors.map((color) => <button key={color} className={selectedColor === color ? 'active' : ''} style={{ backgroundColor: color }} title={`${label} color ${color}`} aria-label={`${label} color ${color}`} onClick={() => onSelect(color)} />)}
         </div>
     }
 
@@ -1186,7 +1186,9 @@ function App() {
         if (selectedItem.type === 'text') colorControls = renderColorPicker('Text', selectedItem.color, setSelectedTextColor)
         else if (selectedItem.type === 'grid' && activeGridCell?.itemId === selectedItem.id) {
             colorControls = renderColorPicker('Cell text', selectedGridCellStyle?.color ?? selectedItem.color ?? '#405f51', setSelectedTextColor)
-        } else if (selectedItem.type === 'stroke' || selectedItem.type === 'shape' || selectedItem.type === 'note') {
+        } else if (selectedItem.type === 'note') {
+            colorControls = renderColorPicker('Note', selectedItem.color ?? notePalette[0], setSelectedItemColor, notePalette)
+        } else if (selectedItem.type === 'stroke' || selectedItem.type === 'shape') {
             colorControls = renderColorPicker('Selected item', selectedItem.color ?? '#253c37', setSelectedItemColor)
         }
 
@@ -1220,7 +1222,7 @@ function App() {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
         if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
-        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? '#ffebaa' }}>{item.text}</div></foreignObject>
+        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? notePalette[0] }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
@@ -1380,7 +1382,13 @@ function App() {
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
                             <div className="page-directory-anchor">
                                 <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
-                                {showPageDirectory && <div className="page-directory-menu">{pages.map((page, index) => <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}</div>}
+                                {showPageDirectory && openLesson && <div className="page-directory-menu">{pages.map((page, index) => {
+                                    const key = `${openLesson.id}:${index}`
+                                    return <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} title={page} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}>
+                                        <span className="page-directory-thumb" aria-hidden="true" style={{ background: backgroundsByPage[key] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[key] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></span>
+                                        <span className="page-directory-label"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><span className="page-directory-name">{page}</span></span>
+                                    </button>
+                                })}</div>}
                             </div>
                             <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><ChevronRight size={18} /></button></>}</div>
                         </div>
