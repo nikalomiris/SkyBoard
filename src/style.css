@@ -101,7 +101,7 @@ input:focus-visible {
     align-items: center;
     gap: 8px;
     color: #96a09c;
-    font-size: 12px;
+    font-size: 14px;
     white-space: nowrap;
 }
 
@@ -118,7 +118,7 @@ input:focus-visible {
     padding: 0;
     background: none;
     color: #809089;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .crumb-link:hover {
@@ -147,7 +147,7 @@ input:focus-visible {
     border-radius: 50%;
     background: #edc7ac;
     color: #684b3b;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
 }
 
@@ -176,7 +176,7 @@ input:focus-visible {
 
 .profile-name {
     color: #6c7974;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .more-button,
@@ -220,7 +220,7 @@ input:focus-visible {
     align-items: center;
     gap: 8px;
     padding: 9px 13px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }
 
@@ -239,7 +239,7 @@ input:focus-visible {
     background: #f7faf8;
     border-radius: 6px;
     padding: 8px 11px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }
 
@@ -284,7 +284,7 @@ input:focus-visible {
     background: #3e7768;
     color: white;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 14px;
     box-shadow: 0 3px 7px #3e77681f;
 }
 
@@ -305,7 +305,7 @@ input:focus-visible {
     background: transparent;
     color: #6d7b75;
     text-align: left;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .nav-item:hover {
@@ -322,7 +322,7 @@ input:focus-visible {
 .nav-count {
     margin-left: auto;
     color: #8d9b94;
-    font: 10px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .nav-section-heading {
@@ -333,7 +333,7 @@ input:focus-visible {
     color: #9aa49f;
     text-transform: uppercase;
     letter-spacing: .7px;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -372,7 +372,7 @@ input:focus-visible {
 .folder-row.subfolder-row>.nav-item {
     min-height: 32px;
     padding-left: 25px;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .folder-menu-anchor {
@@ -427,7 +427,7 @@ input:focus-visible {
     border-radius: 3px;
     background: transparent;
     color: #bc6654;
-    font-size: 9px;
+    font-size: 12px;
     text-align: left;
 }
 
@@ -506,12 +506,12 @@ input:focus-visible {
 .sidebar-bottom strong {
     margin-bottom: 4px;
     color: #65746d;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .sidebar-bottom span {
     color: #9aa49f;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .library-main {
@@ -576,7 +576,7 @@ input:focus-visible {
 .eyebrow {
     margin: 0 0 10px;
     color: #ba8b55;
-    font: 500 9px 'DM Mono', monospace;
+    font: 500 12px 'DM Mono', monospace;
     letter-spacing: 1.6px;
 }
 
@@ -591,7 +591,7 @@ h1 {
 .library-subtitle {
     margin: 8px 0 0;
     color: #84918b;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .folder-create-button {
@@ -603,7 +603,7 @@ h1 {
     border-radius: 5px;
     background: white;
     color: #55766a;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -640,7 +640,7 @@ h1 {
     outline: 0;
     background: transparent;
     color: var(--ink);
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .search-box input::placeholder {
@@ -652,7 +652,7 @@ kbd {
     border: 1px solid #e7ece9;
     border-radius: 3px;
     color: #a3ada7;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .control-right {
@@ -689,7 +689,7 @@ kbd {
     border-radius: 4px;
     background: #fff;
     color: #74817a;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .subfolder-section {
@@ -702,13 +702,13 @@ kbd {
     align-items: center;
     gap: 7px;
     color: #829087;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
 .subfolder-section-heading span:last-child {
     color: #9aa69f;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .subfolder-grid {
@@ -757,14 +757,14 @@ kbd {
 .subfolder-card-copy strong {
     overflow: hidden;
     color: #465e50;
-    font-size: 10px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .subfolder-card-copy span {
     color: #929e96;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .subfolder-card>svg:last-child {
@@ -777,14 +777,14 @@ kbd {
     display: flex;
     justify-content: space-between;
     color: #9ca7a1;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
     text-transform: uppercase;
     letter-spacing: .55px;
 }
 
 .library-label-row>span:first-child {
     color: #77857f;
-    font: 600 10px 'Century Gothic', sans-serif;
+    font: 600 12px 'Century Gothic', sans-serif;
     text-transform: none;
     letter-spacing: 0;
 }
@@ -1108,7 +1108,7 @@ kbd {
     margin: 0;
     overflow: hidden;
     color: #42564d;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1117,7 +1117,7 @@ kbd {
 .lesson-rename-input {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     color: #42564d;
     border: 1px solid #8aa796;
@@ -1133,7 +1133,7 @@ kbd {
     border-radius: 999px;
     background: #ffd166;
     color: #6b4b00;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .3px;
@@ -1150,7 +1150,7 @@ kbd {
     background: #fff3d6;
     border: 1px solid #ffd166;
     color: #6b4b00;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
 }
 
@@ -1205,7 +1205,7 @@ kbd {
     border-radius: 3px;
     background: transparent;
     color: #5e6e66;
-    font-size: 9px;
+    font-size: 12px;
     text-align: left;
 }
 
@@ -1232,7 +1232,7 @@ kbd {
     display: block;
     padding: 3px 7px;
     color: #a1aaa5;
-    font: 8px 'DM Mono', monospace;
+    font: 11px 'DM Mono', monospace;
     text-transform: uppercase;
 }
 
@@ -1243,7 +1243,7 @@ kbd {
     align-items: center;
     gap: 6px;
     color: #98a39d;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .lesson-folder {
@@ -1281,7 +1281,7 @@ kbd {
     border-radius: 3px;
     background: #edf4ef;
     color: #60766a;
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.3;
     overflow-wrap: anywhere;
 }
@@ -1321,7 +1321,7 @@ kbd {
 .tag-empty-state {
     margin: 16px 0 0;
     color: #8b9990;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .cover-editor-preview {
@@ -1384,12 +1384,12 @@ kbd {
 
 .new-lesson-card strong {
     color: #60776b;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .new-lesson-card>span:last-child {
     color: #9aa79f;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .list-view {
@@ -1450,7 +1450,7 @@ kbd {
     justify-content: center;
     gap: 9px;
     color: #909d96;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .empty-state strong {
@@ -1474,7 +1474,7 @@ kbd {
     display: flex;
     justify-content: space-between;
     color: #a3ada7;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .footer-sparkle {
@@ -1598,7 +1598,7 @@ kbd {
     max-width: 220px;
     overflow: hidden;
     color: #44564e;
-    font-size: 10px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: text;
@@ -1608,7 +1608,7 @@ kbd {
     display: block;
     max-width: 220px;
     color: #44564e;
-    font-size: 10px;
+    font-size: 12px;
     font-family: inherit;
     font-weight: inherit;
     border: 1px solid #8aa796;
@@ -1619,7 +1619,7 @@ kbd {
 .board-title>div:nth-child(2) span {
     margin-top: 4px;
     color: #99a49e;
-    font-size: 8px;
+    font-size: 11px;
 }
 
 .title-dropdown {
@@ -1642,7 +1642,7 @@ kbd {
     border-radius: 6px;
     background: #fafcfa;
     color: #45584e;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
 }
 
@@ -1673,7 +1673,7 @@ kbd {
     border-radius: 5px;
     background: transparent;
     color: #44564e;
-    font-size: 10px;
+    font-size: 12px;
     text-align: left;
 }
 
@@ -1703,7 +1703,7 @@ kbd {
     border-radius: 5px;
     color: #4c7767;
     background: #f7faf8;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -1848,7 +1848,7 @@ kbd {
 .selection-toolbar span {
     margin-right: 6px;
     color: #728479;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .selection-toolbar button {
@@ -1866,7 +1866,7 @@ kbd {
     width: auto;
     min-width: 27px;
     padding: 0 4px;
-    font-size: 9px;
+    font-size: 12px;
     white-space: nowrap;
 }
 
@@ -1891,7 +1891,7 @@ kbd {
 .text-font-toolbar>label {
     flex: 0 0 auto;
     color: #728479;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .grid-text-toolbar>button {
@@ -1920,7 +1920,7 @@ kbd {
     border-radius: 4px;
     background: #fbfcfb;
     color: #42594c;
-    font: 9px 'Century Gothic', sans-serif;
+    font: 12px 'Century Gothic', sans-serif;
 }
 
 .selection-toolbar button:hover {
@@ -1964,7 +1964,7 @@ kbd {
 }
 
 .grid-size-label {
-    font-size: 10px;
+    font-size: 12px;
     color: #6b7a71;
     margin-right: 4px;
 }
@@ -1974,7 +1974,7 @@ kbd {
     right: 22px;
     bottom: 15px;
     color: #c5c8b8;
-    font: 8px 'DM Mono', monospace;
+    font: 11px 'DM Mono', monospace;
     letter-spacing: 1.1px;
     pointer-events: none;
 }
@@ -1994,7 +1994,7 @@ kbd {
     white-space: pre-line;
     text-align: center;
     color: #735c37;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.7;
     background: #ffebaa;
     box-shadow: 2px 4px 9px #8d784329;
@@ -2075,7 +2075,7 @@ kbd {
     max-width: 95%;
     overflow: hidden;
     color: #63756a;
-    font-size: 10px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -2101,7 +2101,7 @@ kbd {
     border-radius: 12px 12px 12px 2px;
     background: #6e88c3;
     color: white;
-    font-size: 8px;
+    font-size: 11px;
     box-shadow: 0 2px 7px #24375d28;
     animation: cursor-in .3s both;
     pointer-events: none;
@@ -2156,7 +2156,7 @@ kbd {
     border-bottom: 2px solid transparent;
     background: transparent;
     color: #88958e;
-    font-size: 9px;
+    font-size: 12px;
     white-space: nowrap;
 }
 
@@ -2177,7 +2177,7 @@ kbd {
 
 .page-number {
     color: #b1bcb5;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .page-tab.active .page-number {
@@ -2204,7 +2204,7 @@ kbd {
     align-items: center;
     gap: 5px;
     color: #9aa49e;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .page-dock-actions button {
@@ -2264,7 +2264,7 @@ kbd {
 
 .panel-heading strong {
     display: block;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .panel-heading button,
@@ -2298,7 +2298,7 @@ kbd {
     border: 0;
     background: transparent;
     color: #819087;
-    font-size: 8px;
+    font-size: 11px;
 }
 
 .background-swatch span {
@@ -2325,7 +2325,7 @@ kbd {
 
 .panel-small-label {
     color: #a0aaa4;
-    font: 8px 'DM Mono', monospace;
+    font: 11px 'DM Mono', monospace;
 }
 
 .background-colors {
@@ -2364,7 +2364,7 @@ kbd {
     border-radius: 4px;
     background: #fafcfa;
     color: #668071;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .background-scope {
@@ -2379,7 +2379,7 @@ kbd {
     border-radius: 4px;
     background: #fafcfa;
     color: #668071;
-    font-size: 9px;
+    font-size: 12px;
     text-align: left;
 }
 
@@ -2394,7 +2394,7 @@ kbd {
     display: block;
     margin-bottom: 5px;
     color: #c6944e;
-    font: 8px 'DM Mono', monospace;
+    font: 11px 'DM Mono', monospace;
     letter-spacing: 1px;
 }
 
@@ -2483,7 +2483,7 @@ kbd {
     border-radius: 6px;
     color: #456454;
     background: transparent;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .blend-dot {
@@ -2522,7 +2522,7 @@ kbd {
     border-radius: 4px;
     background: #f7faf7;
     color: #63816f;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .modal-scrim {
@@ -2554,7 +2554,7 @@ kbd {
 .profile-loading {
     padding: 24px 0 5px;
     color: #839088;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .profile-form {
@@ -2598,7 +2598,7 @@ kbd {
 .profile-avatar-actions>span {
     flex: 0 0 100%;
     color: #97a29b;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .profile-upload-button,
@@ -2612,7 +2612,7 @@ kbd {
     border-radius: 4px;
     background: #fbfcfb;
     color: #5e7668;
-    font-size: 9px;
+    font-size: 12px;
     cursor: pointer;
 }
 
@@ -2641,7 +2641,7 @@ kbd {
     border-radius: 4px;
     background: #f7f9f7;
     color: #77857c;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 400;
     overflow-wrap: anywhere;
 }
@@ -2655,7 +2655,7 @@ kbd {
 .profile-password-form h3 {
     margin: 0;
     color: #42584b;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .profile-password-form .auth-submit {
@@ -2708,7 +2708,7 @@ kbd {
 .auth-intro {
     margin: 8px 0 22px;
     color: #829087;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
 }
 
@@ -2721,7 +2721,7 @@ kbd {
     display: grid;
     gap: 6px;
     color: #607369;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -2751,7 +2751,7 @@ kbd {
     outline: 0;
     background: transparent;
     color: #34483e;
-    font-size: 12px;
+    font-size: 14px;
 }
 
 .auth-input-wrap input:focus-visible {
@@ -2770,7 +2770,7 @@ kbd {
     border-radius: 4px;
     background: #3e7768;
     color: #fff;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
 }
 
@@ -2790,7 +2790,7 @@ kbd {
     border: 0;
     background: transparent;
     color: #477a67;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -2804,7 +2804,7 @@ kbd {
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
@@ -2825,7 +2825,7 @@ kbd {
     padding-top: 12px;
     border-top: 1px solid #edf0ed;
     color: #909b94;
-    font-size: 9px;
+    font-size: 12px;
     line-height: 1.55;
 }
 
@@ -2835,7 +2835,7 @@ kbd {
     border-bottom: 1px solid #f0e4c8;
     background: #fff9ed;
     color: #816f4d;
-    font-size: 9px;
+    font-size: 12px;
     text-align: center;
 }
 
@@ -2864,7 +2864,7 @@ kbd {
 .share-modal p {
     margin: 0;
     color: #84918a;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.7;
 }
 
@@ -2879,7 +2879,7 @@ kbd {
     gap: 6px;
     margin-top: 15px;
     color: #6d8174;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -2892,7 +2892,7 @@ kbd {
     border-radius: 4px;
     background: #fbfcfb;
     color: #42594c;
-    font: 11px 'Century Gothic', sans-serif;
+    font: 13px 'Century Gothic', sans-serif;
 }
 
 .new-lesson-field input:focus,
@@ -2914,7 +2914,7 @@ kbd {
     border-radius: 4px;
     background: #fbfcfb;
     color: #42594c;
-    font: 11px/1.5 'Century Gothic', sans-serif;
+    font: 13px/1.5 'Century Gothic', sans-serif;
 }
 
 .postit-textarea:focus {
@@ -2945,7 +2945,7 @@ kbd {
     min-height: 30px;
     padding: 0 9px;
     border-radius: 4px;
-    font: 700 9px 'Century Gothic', sans-serif;
+    font: 700 12px 'Century Gothic', sans-serif;
     cursor: pointer;
 }
 
@@ -2970,7 +2970,7 @@ kbd {
 .cover-picker legend {
     padding: 0;
     color: #6d8174;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -3010,7 +3010,7 @@ kbd {
 
 .cover-option>span {
     overflow-wrap: anywhere;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
 }
 
@@ -3053,7 +3053,7 @@ kbd {
     justify-content: center;
     gap: 6px;
     border-radius: 4px;
-    font: 700 10px 'Century Gothic', sans-serif;
+    font: 700 12px 'Century Gothic', sans-serif;
     cursor: pointer;
 }
 
@@ -3085,7 +3085,7 @@ kbd {
     border-radius: 5px;
     background: #fbfcfb;
     color: #6d7e73;
-    font: 9px 'DM Mono', monospace;
+    font: 12px 'DM Mono', monospace;
 }
 
 .share-link span {
@@ -3101,7 +3101,7 @@ kbd {
     border-radius: 5px;
     background: #fbfcfb;
     color: #6d7e73;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .share-link-status.error {
@@ -3119,7 +3119,7 @@ kbd {
     border-radius: 4px;
     background: #3e7768;
     color: #fff;
-    font: 700 9px 'Century Gothic', sans-serif;
+    font: 700 12px 'Century Gothic', sans-serif;
 }
 
 .share-permission {
@@ -3128,7 +3128,7 @@ kbd {
     align-items: center;
     gap: 6px;
     color: #82a18b;
-    font-size: 9px;
+    font-size: 12px;
 }
 
 .image-search-form {
@@ -3147,7 +3147,7 @@ kbd {
     border-radius: 4px;
     background: #fbfcfb;
     color: #53685b;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 .image-search-form button,
@@ -3161,7 +3161,7 @@ kbd {
     border-radius: 4px;
     background: #3e7768;
     color: white;
-    font-size: 9px;
+    font-size: 12px;
     font-weight: 700;
     white-space: nowrap;
 }
@@ -3171,7 +3171,7 @@ kbd {
     gap: 6px;
     margin-top: 14px;
     color: #a0aaa4;
-    font: 8px 'DM Mono', monospace;
+    font: 11px 'DM Mono', monospace;
 }
 
 .insert-image-button {
@@ -3198,7 +3198,7 @@ kbd {
     border-radius: 5px;
     background: white;
     color: #4b7660;
-    font-size: 10px;
+    font-size: 12px;
     box-shadow: 0 5px 20px #293d321a;
     animation: toast-in .2s both;
 }
@@ -3313,7 +3313,7 @@ kbd {
         position: static;
         transform: none;
         margin-left: 10px;
-        font-size: 10px;
+        font-size: 12px;
         overflow: hidden;
     }
 
@@ -3420,7 +3420,7 @@ kbd {
 
     .library-subtitle {
         max-width: 220px;
-        font-size: 9px;
+        font-size: 12px;
     }
 
     .folder-create-button {
@@ -3496,7 +3496,7 @@ kbd {
     }
 
     .lesson-name-line h2 {
-        font-size: 10px;
+        font-size: 12px;
     }
 
     .card-menu-button {
@@ -3528,7 +3528,7 @@ kbd {
 
     .library-footer {
         padding-top: 23px;
-        font-size: 8px;
+        font-size: 11px;
     }
 
     .board-layout {
@@ -3567,11 +3567,11 @@ kbd {
 
     .board-title strong {
         max-width: 135px;
-        font-size: 9px;
+        font-size: 12px;
     }
 
     .board-title>div:nth-child(2) span {
-        font-size: 7px;
+        font-size: 10px;
     }
 
     .board-toolbar-right {
@@ -3615,12 +3615,12 @@ kbd {
     .page-tab {
         min-width: 72px;
         padding: 0 7px;
-        font-size: 8px;
+        font-size: 11px;
     }
 
     .page-dock-actions {
         gap: 0;
-        font-size: 8px;
+        font-size: 11px;
     }
 
     .page-dock-actions button {
@@ -3761,7 +3761,7 @@ kbd {
 
     .library-subtitle {
         max-width: 220px;
-        font-size: 9px;
+        font-size: 12px;
     }
 
     .folder-create-button {
@@ -3837,7 +3837,7 @@ kbd {
     }
 
     .lesson-name-line h2 {
-        font-size: 10px;
+        font-size: 12px;
     }
 
     .card-menu-button {
@@ -3869,7 +3869,7 @@ kbd {
 
     .library-footer {
         padding-top: 23px;
-        font-size: 8px;
+        font-size: 11px;
     }
 }
 .paste-modal {
@@ -3905,7 +3905,7 @@ kbd {
 }
 
 .paste-entry span {
-    font-size: 12px;
+    font-size: 14px;
     color: #75837e;
 }
 
