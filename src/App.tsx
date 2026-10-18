@@ -3,7 +3,7 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { Session } from '@supabase/supabase-js'
 import {
     ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
-    Circle, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
+    Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     RotateCw, StickyNote, Tag, Trash2, Type, Users, X,
@@ -22,7 +22,7 @@ import {
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
 import type { ItemBounds, Point } from './lib/boardGeometry'
-import type { BoardItem, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
+import type { BoardItem, ClipboardPage, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type ItemGesture =
     | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
@@ -100,6 +100,8 @@ function App() {
     const [coverEditorLessonId, setCoverEditorLessonId] = useState<string | null>(null)
     const [renamingTitle, setRenamingTitle] = useState(false)
     const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
+    const [clipboardPages, setClipboardPages] = useState<ClipboardPage[]>(() => readStored<ClipboardPage[]>('skyboard:page-clipboard', []))
+    const [showPasteDialog, setShowPasteDialog] = useState(false)
     const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
     const [subfolderName, setSubfolderName] = useState('')
     const [newLessonTitle, setNewLessonTitle] = useState('Untitled lesson')
@@ -233,6 +235,16 @@ function App() {
         return matchesFolder && lesson.title.toLowerCase().includes(search.toLowerCase())
     })
 
+    useEffect(() => {
+        try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { notify('Clipboard is too large to keep after a refresh') }
+    }, [clipboardPages])
+    useEffect(() => {
+        function syncClipboard(event: StorageEvent) {
+            if (event.key === 'skyboard:page-clipboard') setClipboardPages(readStored<ClipboardPage[]>('skyboard:page-clipboard', []))
+        }
+        window.addEventListener('storage', syncClipboard)
+        return () => window.removeEventListener('storage', syncClipboard)
+    }, [])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:lessons', JSON.stringify(lessons)) }, [lessons])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:folders', JSON.stringify(folders)) }, [folders])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
@@ -716,12 +728,52 @@ function App() {
         setLessons((previous) => previous.map((lesson) => lesson.id === updatedLesson.id ? updatedLesson : lesson))
     }
 
+    function insertPage(index: number, name: string, items: BoardItem[], pageBackground?: string) {
+        if (!openLesson) return
+        const lessonId = openLesson.id
+        const shiftKeys = <T,>(map: Record<string, T>) => {
+            const next = { ...map }
+            for (let i = pages.length - 1; i >= index; i--) {
+                const from = `${lessonId}:${i}`
+                const to = `${lessonId}:${i + 1}`
+                if (from in map) next[to] = map[from]
+                else delete next[to]
+            }
+            delete next[`${lessonId}:${index}`]
+            return next
+        }
+        for (let i = index; i <= pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
+        const newKey = `${lessonId}:${index}`
+        updateLessonPages([...pages.slice(0, index), name, ...pages.slice(index)])
+        setItemsByPage((previous) => ({ ...shiftKeys(previous), [newKey]: items.map((item) => ({ ...item, id: id() })) }))
+        setBackgroundsByPage((previous) => {
+            const next = shiftKeys(previous)
+            if (pageBackground) next[newKey] = pageBackground
+            return next
+        })
+        setPageIndex(index)
+        setSelectedItemId(null)
+    }
+
     function duplicatePage() {
-        const nextPages = [...pages.slice(0, pageIndex + 1), `${pages[pageIndex]} copy`, ...pages.slice(pageIndex + 1)]
-        updateLessonPages(nextPages)
-        setItemsByPage((previous) => ({ ...previous, [`${openLesson?.id}:${pageIndex + 1}`]: [...currentItems.map((item) => ({ ...item, id: id() }))] }))
-        setPageIndex(pageIndex + 1)
+        insertPage(pageIndex + 1, `${pages[pageIndex]} copy`, currentItems, backgroundsByPage[currentPageKey])
         notify('Page duplicated')
+    }
+
+    function copyPage() {
+        if (!openLesson) return
+        const entry: ClipboardPage = {
+            id: id(), name: pages[pageIndex], sourceLesson: openLesson.title, copiedAt: new Date().toISOString(),
+            items: structuredClone(currentItems), background: backgroundsByPage[currentPageKey],
+        }
+        setClipboardPages((previous) => [entry, ...previous].slice(0, 20))
+        notify('Page copied to clipboard')
+    }
+
+    function pasteClipboardPage(entry: ClipboardPage) {
+        insertPage(pageIndex + 1, entry.name, entry.items, entry.background)
+        setShowPasteDialog(false)
+        notify('Page pasted')
     }
 
     function deletePage() {
@@ -1379,9 +1431,39 @@ function App() {
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
+                            <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
                         </div>
                     </main>
+                </div>
+            )}
+            {showPasteDialog && openLesson && !studentView && (
+                <div className="modal-scrim" onClick={() => setShowPasteDialog(false)}>
+                    <div className="share-modal paste-modal" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') setShowPasteDialog(false) }}>
+                        <button type="button" className="modal-close" onClick={() => setShowPasteDialog(false)} aria-label="Close"><X size={18} /></button>
+                        <div className="share-modal-icon"><ClipboardPaste size={20} /></div>
+                        <h2>Paste a page</h2>
+                        <p>Choose a copied page to insert after page {pageIndex + 1}.</p>
+                        {clipboardPages.length === 0 ? <p className="paste-empty">No copied pages yet. Use the copy button on a page first.</p> : (
+                            <ul className="paste-list">
+                                {clipboardPages.map((entry) => (
+                                    <li key={entry.id}>
+                                        <button type="button" className="paste-entry" onClick={() => pasteClipboardPage(entry)}>
+                                            <div className="paste-thumb" aria-hidden="true" style={{ background: entry.background ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{entry.items.map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div>
+                                            <div className="paste-info">
+                                                <strong>{entry.name}</strong>
+                                                <span>{entry.sourceLesson} · {entry.items.length} item{entry.items.length === 1 ? '' : 's'} · {new Date(entry.copiedAt).toLocaleString()}</span>
+                                            </div>
+                                        </button>
+                                        <button type="button" className="paste-remove" aria-label={`Remove ${entry.name} from clipboard`} onClick={() => setClipboardPages((previous) => previous.filter((item) => item.id !== entry.id))}><Trash2 size={14} /></button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                        <div className="new-lesson-actions">
+                            {clipboardPages.length > 0 && <button type="button" className="cancel-button" onClick={() => setClipboardPages([])}>Clear clipboard</button>}
+                            <button type="button" className="cancel-button" onClick={() => setShowPasteDialog(false)}>Close</button>
+                        </div>
+                    </div>
                 </div>
             )}
             {postitDraft && <div className="modal-scrim" onClick={() => setPostitDraft(null)}><form className="share-modal postit-editor-modal" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setPostitDraft(null) } }} onSubmit={(event) => { event.preventDefault(); const text = postitDraft.text.trim(); if (!text) return; addBoardItem({ id: id(), type: 'note', left: postitDraft.left, top: postitDraft.top, text }); setPostitDraft(null) }}><button type="button" className="modal-close" onClick={() => setPostitDraft(null)} aria-label="Close note editor"><X size={18} /></button><div className="share-modal-icon"><StickyNote size={20} /></div><h2>Add a sticky note</h2><p>Write a reminder for this lesson page.</p><label className="new-lesson-field">Note text<textarea className="postit-textarea" autoFocus value={postitDraft.text} onChange={(event) => setPostitDraft((draft) => draft ? { ...draft, text: event.target.value } : draft)} /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setPostitDraft(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!postitDraft.text.trim()}><StickyNote size={15} /> Add note</button></div></form></div>}

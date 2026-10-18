@@ -11,7 +11,21 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite in your terminal.
+Open the local URL printed by Vite in your terminal (by default http://localhost:5173/).
+
+## Common commands
+
+| Command | Purpose |
+| --- | --- |
+| `npm install` | Install dependencies (run again after pulling dependency changes) |
+| `npm run dev` | Start the dev server with hot reload |
+| `npm run dev -- --host` | Start the dev server and expose it on your network (e.g. to test on another device) |
+| `npx tsc -b` | Type-check the project without building |
+| `npm run build` | Type-check and create the production build in `dist/` |
+| `npm run preview` | Serve the production build locally |
+| `npx supabase db push` | Apply database migrations to the linked Supabase project |
+
+Student view: add `?view=student` to the app URL.
 
 ## Build
 
