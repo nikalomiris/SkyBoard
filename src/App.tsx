@@ -239,6 +239,9 @@ function App() {
         try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { notify('Clipboard is too large to keep after a refresh') }
     }, [clipboardPages])
     useEffect(() => {
+        document.querySelector('.page-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }, [pageIndex, pages.length])
+    useEffect(() => {
         function syncClipboard(event: StorageEvent) {
             if (event.key === 'skyboard:page-clipboard') setClipboardPages(readStored<ClipboardPage[]>('skyboard:page-clipboard', []))
         }
