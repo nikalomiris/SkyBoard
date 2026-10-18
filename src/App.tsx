@@ -6,7 +6,7 @@ import {
     Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    RotateCw, StickyNote, Tag, Trash2, Type, Users, X,
+    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, X,
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import LessonThumbnail from './components/LessonThumbnail'
@@ -724,9 +724,7 @@ function App() {
     }
 
     function addPage() {
-        const nextPages = [...pages, `Page ${pages.length + 1}`]
-        updateLessonPages(nextPages)
-        setPageIndex(nextPages.length - 1)
+        insertPage(pages.length, `Page ${pages.length + 1}`, [])
     }
 
     function updateLessonPages(nextPages: string[]) {
@@ -787,7 +785,21 @@ function App() {
 
     function deletePage() {
         if (pages.length <= 1) return notify('A lesson needs at least one page')
+        if (!openLesson) return
+        const lessonId = openLesson.id
         const nextPages = pages.filter((_, index) => index !== pageIndex)
+        const shiftDown = <T,>(map: Record<string, T>) => {
+            const next = { ...map }
+            for (let i = pageIndex; i < pages.length; i++) {
+                const from = `${lessonId}:${i + 1}`
+                if (i + 1 < pages.length && from in map) next[`${lessonId}:${i}`] = map[from]
+                else delete next[`${lessonId}:${i}`]
+            }
+            return next
+        }
+        for (let i = pageIndex; i < pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
+        setItemsByPage(shiftDown)
+        setBackgroundsByPage(shiftDown)
         updateLessonPages(nextPages)
         const nextIndex = Math.max(0, pageIndex - 1)
         setPageIndex(nextIndex)
@@ -897,7 +909,11 @@ function App() {
     }
 
     function adjustSelectedTextSize(delta: number) {
-        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
+        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid' && selectedItem.type !== 'note')) return
+        if (selectedItem.type === 'note') {
+            updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'note' ? { ...item, fontSize: Math.max(8, Math.min(48, (item.fontSize ?? 14) + delta)) } : item))
+            return
+        }
         if (selectedItem.type === 'grid') {
             updateSelectedGridCellStyle((style, grid) => ({ ...style, fontSize: Math.max(10, Math.min(96, (style.fontSize ?? grid.fontSize ?? 20) + delta)) }))
             return
@@ -909,7 +925,11 @@ function App() {
     }
 
     function setSelectedFontFamily(fontFamily: string) {
-        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
+        if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid' && selectedItem.type !== 'note')) return
+        if (selectedItem.type === 'note') {
+            updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'note' ? { ...item, fontFamily } : item))
+            return
+        }
         if (selectedItem.type === 'grid') {
             updateSelectedGridCellStyle((style) => ({ ...style, fontFamily }))
             return
@@ -1222,7 +1242,7 @@ function App() {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
         if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
-        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? notePalette[0] }}>{item.text}</div></foreignObject>
+        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
@@ -1390,7 +1410,7 @@ function App() {
                                     </button>
                                 })}</div>}
                             </div>
-                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><ChevronLeft size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><ChevronRight size={18} /></button></>}</div>
+                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
@@ -1403,6 +1423,13 @@ function App() {
                                 <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
                                 <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
                                 <select className="selection-font-picker" value={selectedGridCellStyle?.fontFamily ?? selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Cell text font" title="Cell text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
+                            </div>}
+                            {!studentView && selectedItem?.type === 'note' && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                                <span>Note text</span>
+                                <span>{selectedItem.fontSize ?? 14}px</span>
+                                <button type="button" title="Decrease note text size" aria-label="Decrease note text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                <button type="button" title="Increase note text size" aria-label="Increase note text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
+                                <select className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Note text font" title="Note text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
                             </div>}
                             {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select></div>}
                             <div className="board-page-area">
