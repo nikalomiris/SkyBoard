@@ -129,6 +129,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             folder: row.folder_id ? pathForFolder(row.folder_id) : student?.name ?? 'Unfiled',
             pages: pageNames,
             updated: formatUpdated(row.updated_at),
+            updatedAt: new Date(row.updated_at).getTime(),
             color: row.color,
             cover: row.cover as Lesson['cover'],
             coverImage: row.cover_image ?? undefined,

@@ -43,6 +43,9 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'grid', label: 'Word grid', icon: Grid2X2 },
     { id: 'laser', label: 'Laser pointer', icon: Sparkles },
 ]
+type LessonSortKey = 'edited-desc' | 'edited-asc' | 'name-asc' | 'name-desc'
+const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited', 'edited-asc': 'Oldest edited', 'name-asc': 'Name (A–Z)', 'name-desc': 'Name (Z–A)' }
+
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
     const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
@@ -64,6 +67,8 @@ function App() {
     const [activeFolder, setActiveFolder] = useState('All lessons')
     const [search, setSearch] = useState('')
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+    const [sortKey, setSortKey] = useState<LessonSortKey>('edited-desc')
+    const [sortMenuOpen, setSortMenuOpen] = useState(false)
     const [openLesson, setOpenLesson] = useState<Lesson | null>(() => {
         const params = new URLSearchParams(window.location.search)
         return params.get('view') === 'student' && !isSupabaseConfigured ? readStudentLessons().find((lesson) => lesson.id === params.get('lesson')) ?? null : null
@@ -242,6 +247,11 @@ function App() {
     const visibleLessons = lessons.filter((lesson) => {
         const matchesFolder = activeFolder === 'All lessons' || activeFolder === 'Shared with me' || folderIsWithin(lesson.folder, activeFolder)
         return matchesFolder && lesson.title.toLowerCase().includes(search.toLowerCase())
+    }).sort((first, second) => {
+        if (sortKey === 'name-asc') return first.title.localeCompare(second.title, undefined, { numeric: true, sensitivity: 'base' })
+        if (sortKey === 'name-desc') return second.title.localeCompare(first.title, undefined, { numeric: true, sensitivity: 'base' })
+        const difference = (second.updatedAt ?? 0) - (first.updatedAt ?? 0)
+        return sortKey === 'edited-asc' ? -difference : difference
     })
 
     useEffect(() => {
@@ -486,7 +496,7 @@ function App() {
     function createLesson() {
         const cover = lessonCoverOptions.find((option) => option.id === newLessonCover) ?? lessonCoverOptions[0]
         const lesson: Lesson = {
-            id: id(), title: newLessonTitle.trim() || 'Untitled lesson', folder: newLessonFolder || folders[0] || 'My lessons', pages: ['Page 1'], updated: 'Just now',
+            id: id(), title: newLessonTitle.trim() || 'Untitled lesson', folder: newLessonFolder || folders[0] || 'My lessons', pages: ['Page 1'], updated: 'Just now', updatedAt: Date.now(),
             color: cover.tint, cover: cover.id, kind: 'lesson',
         }
         setLessons((previous) => [lesson, ...previous])
@@ -545,7 +555,7 @@ function App() {
     }
 
     function duplicateLesson(lesson: Lesson) {
-        const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, pages: [...lesson.pages], updated: 'Just now' }
+        const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
         setLessons((previous) => [copy, ...previous])
         setShowFileMenu(null)
         notify('Lesson duplicated')
@@ -737,7 +747,7 @@ function App() {
 
     function updateLessonPages(nextPages: string[]) {
         if (!openLesson) return
-        const updatedLesson = { ...openLesson, pages: nextPages }
+        const updatedLesson = { ...openLesson, pages: nextPages, updated: 'Just now', updatedAt: Date.now() }
         setPages(nextPages)
         setOpenLesson(updatedLesson)
         setLessons((previous) => previous.map((lesson) => lesson.id === updatedLesson.id ? updatedLesson : lesson))
@@ -1297,7 +1307,7 @@ function App() {
                     <main className="library-main">
                         {isMockWorkspace && <div className="demo-banner"><Sparkles size={15} /><span>You're viewing <strong>sample students and lessons</strong> so you can explore SkyBoard. Connect Supabase to replace this demo data with your own.</span></div>}
                         <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> New folder</button></div>
-                        <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your lessons" aria-label="Search your lessons" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><button className="sort-button"><span>Last edited</span><ChevronDown size={15} /></button></div></div>
+                        <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your lessons" aria-label="Search your lessons" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><div className="sort-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSortMenuOpen(false) }}><button className="sort-button" aria-haspopup="listbox" aria-expanded={sortMenuOpen} onClick={() => setSortMenuOpen((open) => !open)}><span>{sortLabels[sortKey]}</span><ChevronDown size={15} /></button>{sortMenuOpen && <div className="sort-menu" role="listbox" aria-label="Sort lessons">{(Object.keys(sortLabels) as LessonSortKey[]).map((key) => <button key={key} role="option" aria-selected={sortKey === key} className={sortKey === key ? 'selected' : ''} onClick={() => { setSortKey(key); setSortMenuOpen(false) }}><span>{sortLabels[key]}</span>{sortKey === key && <Check size={14} />}</button>)}</div>}</div></div></div>
                         {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
                             <div className="subfolder-section-heading"><span>Subfolders</span><span>{visibleSubfolders.length}</span></div>
                             <div className="subfolder-grid">
@@ -1311,7 +1321,7 @@ function App() {
                                 })}
                             </div>
                         </section>}
-                        <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>NAME <MoveRight size={13} /> LAST OPENED</span></div>
+                        <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>Sorted by {sortLabels[sortKey]}</span></div>
                         {visibleLessons.length > 0 ? <div className={`lesson-grid ${viewMode === 'list' ? 'list-view' : ''}`}>
                             {visibleLessons.map((lesson) => {
                                 const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
@@ -1567,7 +1577,7 @@ function App() {
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
-            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
+            ~            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
             {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
             {toast && <div className="toast-message"><Check size={15} />{toast}</div>}
         </div>
