@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
 import { Check, Trash2, X } from 'lucide-react'
 
-export type BlendTile = { id: string; text: string; x: number; y: number }
+export type BlendTile = { id: string; text: string; x: number; y: number; kind?: string }
 
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
@@ -50,7 +50,7 @@ const TILE_W = 104
 const TILE_H = 104
 const SNAP_DISTANCE = 40
 
-type Drag = { tileId: string | null; text: string; offsetX: number; offsetY: number; clientX: number; clientY: number }
+type Drag = { tileId: string | null; text: string; kind?: string; offsetX: number; offsetY: number; clientX: number; clientY: number }
 
 function tileClass(text: string) {
     return vowels.has(text) ? 'vowel' : 'consonant'
@@ -77,7 +77,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
     const tilesRef = useRef(tiles)
     tilesRef.current = tiles
 
-    function startDrag(event: ReactPointerEvent<HTMLElement>, text: string, tileId: string | null) {
+    function startDrag(event: ReactPointerEvent<HTMLElement>, text: string, tileId: string | null, kind?: string) {
         event.preventDefault()
         const rect = event.currentTarget.getBoundingClientRect()
         const fromCanvas = tileId !== null
@@ -85,6 +85,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
         const current: Drag = {
             tileId,
             text,
+            kind,
             offsetX: fromCanvas ? event.clientX - rect.left : size.width / 2,
             offsetY: fromCanvas ? event.clientY - rect.top : size.height / 2,
             clientX: event.clientX,
@@ -113,7 +114,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
                     tilesRef.current,
                     text,
                 )
-                setTiles((previous) => [...previous, { id: `bt-${Date.now()}-${nextId.current++}`, text, x, y }])
+                setTiles((previous) => [...previous, { id: `bt-${Date.now()}-${nextId.current++}`, text, x, y, kind }])
             }
             setDrag(null)
         }
@@ -144,21 +145,22 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
         </div>
         <div className="blending-tray">
-            {activeTab === 'Syllable Labels' ? <div className="blending-syllable-labels" role="group" aria-label="Syllable labels">
+            {tabs.filter((tab) => tab === 'Basic Tiles' || tab === 'Glued Sounds' || tab === 'Advanced Vowels' || tab === 'Prefixes, Roots & Suffixes' || tab === 'Capital Letters' || tab === 'Syllable Labels').map((tab) => <div key={tab} className={`blending-tray-panel ${tab === activeTab ? 'active' : ''}`} aria-hidden={tab !== activeTab}>
+            {tab === 'Syllable Labels' ? <div className="blending-syllable-labels" role="group" aria-label="Syllable labels">
                 {syllableLabels.map((text) => {
                     const size = tileSize(text)
                     return <button key={text} className="tray-tile syllable-label-tile" style={{ width: size.width, height: size.height }} aria-label={`Drag ${text} syllable label`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>
                 })}
-            </div> : activeTab === 'Capital Letters' ? <div className="blending-capital-letters" role="group" aria-label="Capital letters">
+            </div> : tab === 'Capital Letters' ? <div className="blending-capital-letters" role="group" aria-label="Capital letters">
                 {letterTiles.map((text) => {
                     const capital = text.toUpperCase()
                     return <button key={text} className={`tray-tile ${tileClass(text)}`} aria-label={`Drag tile ${capital}`} onPointerDown={(event) => startDrag(event, capital, null)}>{capital}</button>
                 })}
-            </div> : activeTab === 'Prefixes, Roots & Suffixes' ? <div className="blending-affix-groups">
+            </div> : tab === 'Prefixes, Roots & Suffixes' ? <div className="blending-affix-groups">
                 {affixRootGroups.map((group, index) => <div className={`blending-affix-group ${group.kind}`} role="group" aria-label={`${group.kind} tiles`} key={`${group.kind}-${index}`}>
-                    {group.tiles.map((text) => <button key={text} className={`tray-tile affix-root-tile ${group.kind}`} aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+                    {group.tiles.map((text) => <button key={text} className={`tray-tile affix-root-tile ${group.kind}`} aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null, group.kind)}>{text}</button>)}
                 </div>)}
-            </div> : activeTab === 'Advanced Vowels' ? <div className="blending-vowel-groups">
+            </div> : tab === 'Advanced Vowels' ? <div className="blending-vowel-groups">
                 {advancedVowelGroups.map((group, index) => <div className="blending-vowel-group" role="group" aria-label={`Advanced vowel group ${index + 1}`} key={index}>
                     {group.map((text) => <button key={text} className="tray-tile consonant advanced-vowel-tile" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                 </div>)}
@@ -167,7 +169,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
                     <div className="blending-letters">
                         {letterTiles.map((text) => <button key={text} className={`tray-tile ${tileClass(text)}`} aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                     </div>
-                    {activeTab === 'Glued Sounds' && <div className="blending-glued-sounds" role="group" aria-label="Glued sounds">
+                    {tab === 'Glued Sounds' && <div className="blending-glued-sounds" role="group" aria-label="Glued sounds">
                         {gluedSoundTiles.map((text) => <button key={text} className="tray-tile consonant glued-sound-tile" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                     </div>}
                 </div>
@@ -175,6 +177,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
                     {digraphTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                 </div>
             </>}
+            </div>)}
         </div>
         <div className="blending-canvas" ref={canvasRef}>
             {activeTab === 'Syllable Labels' ? <aside className="syllable-instructions" aria-label="Instructions">
@@ -194,7 +197,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
             </div>}
             {tiles.map((tile) => {
                 const size = tileSize(tile.text)
-                return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title="Double-click to delete" onPointerDown={(event) => startDrag(event, tile.text, tile.id)} onDoubleClick={() => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
+                return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${tile.kind ? `affix-${tile.kind}` : ''} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title="Double-click to delete" onPointerDown={(event) => startDrag(event, tile.text, tile.id, tile.kind)} onDoubleClick={() => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
             })}
             {tiles.length === 0 && activeTab !== 'Syllable Labels' && <span className="blending-hint">Drag tiles here to build words</span>}
         </div>
@@ -205,7 +208,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
         </div>
         {drag && drag.tileId === null && (() => {
             const size = tileSize(drag.text)
-            return <div className={`canvas-tile ${tileClass(drag.text)} ${syllableLabelSet.has(drag.text) ? 'canvas-syllable-label' : ''} drag-ghost`} style={{ left: drag.clientX - drag.offsetX, top: drag.clientY - drag.offsetY, width: size.width, height: size.height }}>{drag.text}</div>
+            return <div className={`canvas-tile ${tileClass(drag.text)} ${drag.kind ? `affix-${drag.kind}` : ''} ${syllableLabelSet.has(drag.text) ? 'canvas-syllable-label' : ''} drag-ghost`} style={{ left: drag.clientX - drag.offsetX, top: drag.clientY - drag.offsetY, width: size.width, height: size.height }}>{drag.text}</div>
         })()}
     </div>
 }

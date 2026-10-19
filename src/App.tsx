@@ -557,6 +557,16 @@ function App() {
 
     function duplicateLesson(lesson: Lesson) {
         const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
+        const copiedItems: PageItems = {}
+        const copiedBackgrounds: Record<string, string> = {}
+        lesson.pages.forEach((_, index) => {
+            const sourceKey = `${lesson.id}:${index}`
+            const targetKey = `${copy.id}:${index}`
+            if (itemsByPage[sourceKey]) copiedItems[targetKey] = structuredClone(itemsByPage[sourceKey])
+            if (backgroundsByPage[sourceKey]) copiedBackgrounds[targetKey] = backgroundsByPage[sourceKey]
+        })
+        setItemsByPage((previous) => ({ ...previous, ...copiedItems }))
+        setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
         setLessons((previous) => [copy, ...previous])
         setShowFileMenu(null)
         notify('Lesson duplicated')
@@ -1418,7 +1428,7 @@ function App() {
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (!studentView && activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, item.text.length * item.size * 0.62 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (!studentView && activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
                                             className="board-text-input"
                                             autoFocus
                                             value={item.text}
@@ -1433,7 +1443,7 @@ function App() {
                                             }}
                                             onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.currentTarget.blur() } }}
                                         /></foreignObject> : renderBoardItem(item)}</g>)}
-                                        {selectedItem && (() => {
+                                        {selectedItem && selectedItem.id !== editingTextId && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
                                             return <g className="selection-frame">

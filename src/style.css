@@ -3982,13 +3982,25 @@ kbd {
 }
 
 .blending-tray {
+    display: grid;
+    padding: 10px 12px 12px;
+    background: white;
+    box-shadow: 0 2px 6px #0000001a;
+}
+
+.blending-tray-panel {
+    grid-area: 1 / 1;
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    padding: 10px 12px 12px;
-    background: white;
-    box-shadow: 0 2px 6px #0000001a;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.blending-tray-panel.active {
+    visibility: visible;
+    pointer-events: auto;
 }
 
 .blending-vowel-groups {
@@ -4057,6 +4069,7 @@ kbd {
     display: flex;
     flex-wrap: wrap;
     align-content: flex-start;
+    box-sizing: content-box;
     gap: 4px;
     padding: 7px;
     border-radius: 12px;
@@ -4064,45 +4077,61 @@ kbd {
 
 .blending-affix-group.prefix {
     width: 220px;
-    background: #ffd342;
+    border: 3px solid #ffd342;
+    background: transparent;
 }
 
 .blending-affix-group.root {
     width: 336px;
-    background: #34733b;
+    border: 3px solid #34733b;
+    background: transparent;
 }
 
-.affix-root-tile.root {
+.tray-tile.affix-root-tile.root {
     width: 50px;
 }
 
 .blending-affix-group.suffix {
     width: 260px;
-    background: #bd302b;
+    border: 3px solid #bd302b;
+    background: transparent;
 }
 
 .blending-affix-group.suffix:last-child {
     width: 236px;
 }
 
-.affix-root-tile {
+.tray-tile.affix-root-tile {
     width: 38px;
     height: 35px;
     padding: 0 2px;
     font-size: 14px;
 }
 
-.affix-root-tile.prefix {
+.tray-tile.affix-root-tile.prefix {
     color: #a87800;
 }
 
-.affix-root-tile.suffix {
+.tray-tile.affix-root-tile.suffix {
     width: 36px;
     color: #c52823;
     font-size: 12px;
 }
 
-.blending-affix-group.suffix:last-child .affix-root-tile {
+.tray-tile.affix-root-tile.root,
+.canvas-tile.affix-root {
+    color: #34733b;
+}
+
+.canvas-tile.affix-prefix {
+    color: #a87800;
+}
+
+.canvas-tile.affix-suffix {
+    color: #c52823;
+}
+
+.blending-affix-group.suffix:last-child .tray-tile.affix-root-tile {
     width: auto;
     min-width: 36px;
     padding: 0 4px;
