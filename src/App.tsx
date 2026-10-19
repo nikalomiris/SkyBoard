@@ -2,13 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
-    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
+    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronRight,
     Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, X,
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
+import BlendingBoard from './components/BlendingBoard'
+import type { BlendTile } from './components/BlendingBoard'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
@@ -86,7 +88,7 @@ function App() {
     const [showBackgrounds, setShowBackgrounds] = useState(false)
     const [showPageDirectory, setShowPageDirectory] = useState(false)
     const [showBlend, setShowBlend] = useState(false)
-    const [blendRows, setBlendRows] = useState<string[][]>([['sh', 'i', 'p']])
+    const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
@@ -1096,43 +1098,6 @@ function App() {
         setEditingTextId(newItem.id)
     }
 
-    function setBlendToken(rowIndex: number, tokenIndex: number, value: string) {
-        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.map((token, tIndex) => tIndex === tokenIndex ? value : token) : row))
-    }
-
-    function addBlendToken(rowIndex: number) {
-        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? [...row, ''] : row))
-    }
-
-    function removeBlendToken(rowIndex: number, tokenIndex: number) {
-        setBlendRows((previous) => previous.map((row, index) => index === rowIndex ? row.filter((_, tIndex) => tIndex !== tokenIndex) : row))
-    }
-
-    function addBlendRow() {
-        setBlendRows((previous) => [...previous, ['', '', '']])
-    }
-
-    function removeBlendRow(rowIndex: number) {
-        setBlendRows((previous) => previous.length > 1 ? previous.filter((_, index) => index !== rowIndex) : previous)
-    }
-
-    function playBlendRow(rowIndex: number) {
-        const row = blendRows[rowIndex]
-        if (!row?.length) return
-        if (!('speechSynthesis' in window)) {
-            notify('Sound playback is not supported in this browser')
-            return
-        }
-        window.speechSynthesis.cancel()
-        const tokens = [...row.filter((token) => token.trim()), row.join('')]
-        tokens.forEach((token) => {
-            const utterance = new SpeechSynthesisUtterance(token)
-            utterance.rate = 0.8
-            window.speechSynthesis.speak(utterance)
-        })
-    }
-
-
     function setPageBackground(value: string) {
         if (!openLesson) return
         setBackgroundsByPage((previous) => {
@@ -1414,7 +1379,7 @@ function App() {
                         </div>
                         <div className="canvas-workspace">
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showBlend && <div className="blend-panel"><div className="panel-heading"><div><span className="panel-kicker">SOUND IT OUT</span><strong>Blending board</strong></div><button onClick={() => setShowBlend(false)} aria-label="Close blending board"><X size={16} /></button></div>{blendRows.map((row, rowIndex) => <div className="blend-row" key={rowIndex}><div className="blend-track">{row.map((token, tokenIndex) => <div className={`blend-token-wrap ${tokenIndex > 0 ? 'with-dot' : ''}`} key={tokenIndex}><input className="blend-token" value={token} onChange={(event) => setBlendToken(rowIndex, tokenIndex, event.target.value)} aria-label={`Row ${rowIndex + 1} sound ${tokenIndex + 1}`} />{row.length > 1 && <button className="blend-token-remove" aria-label={`Remove sound ${tokenIndex + 1}`} title="Remove sound" onClick={() => removeBlendToken(rowIndex, tokenIndex)}><X size={10} /></button>}</div>)}<button className="blend-add-token" aria-label="Add a sound" title="Add a sound" onClick={() => addBlendToken(rowIndex)}><Plus size={13} /></button></div><div className="blend-word">{row.map((token, tokenIndex) => <span key={tokenIndex}>{token}</span>)}<b>{row.join('')}</b></div><div className="blend-controls"><button onClick={() => playBlendRow(rowIndex)}><AudioLines size={14} /> Play sounds</button>{blendRows.length > 1 && <button onClick={() => removeBlendRow(rowIndex)}><Trash2 size={14} /> Remove row</button>}</div></div>)}<button className="blend-add-row" onClick={addBlendRow}><Plus size={14} /> New row</button></div>}
+                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} onClose={() => setShowBlend(false)} />}
                             {renderSelectedItemToolbar()}
                             {renderToolColorToolbar()}
                             {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>

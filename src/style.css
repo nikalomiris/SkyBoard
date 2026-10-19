@@ -2298,8 +2298,7 @@ kbd {
     background: #e6ebe7;
 }
 
-.background-panel,
-.blend-panel {
+.background-panel {
     position: absolute;
     z-index: 5;
     top: 15px;
@@ -2314,13 +2313,6 @@ kbd {
 
 .background-panel {
     left: 15px;
-}
-
-.blend-panel {
-    right: 25px;
-    width: 360px;
-    max-height: 70vh;
-    overflow-y: auto;
 }
 
 .panel-heading {
@@ -2464,133 +2456,6 @@ kbd {
     color: #c6944e;
     font: 11px var(--font-ui);
     letter-spacing: 1px;
-}
-
-.blend-row {
-    padding: 10px 0;
-    border-bottom: 1px solid #eef2ef;
-}
-
-.blend-row:last-of-type {
-    border-bottom: 0;
-}
-
-.blend-track {
-    margin: 10px 0 12px;
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.blend-token-wrap {
-    position: relative;
-    display: flex;
-    align-items: center;
-}
-
-.blend-token-wrap.with-dot::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    margin-right: 10px;
-    border-radius: 50%;
-    background: #c5d2c9;
-}
-
-.blend-token {
-    width: 62px;
-    height: 62px;
-    border: 1px solid #e4eae4;
-    border-radius: 9px;
-    background: #f5f7ee;
-    color: #45725f;
-    font-size: 26px;
-    font-weight: 700;
-    text-align: center;
-    box-shadow: 0 2px 5px #3f62450b;
-    font-family: var(--font-board);
-}
-
-.blend-token-remove {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    border: 1px solid #e4eae4;
-    background: white;
-    color: #8a9a91;
-}
-
-.blend-add-token {
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px dashed #c6d4cb;
-    border-radius: 9px;
-    color: #74917f;
-    background: transparent;
-}
-
-.blend-add-row {
-    width: 100%;
-    margin-top: 10px;
-    padding: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border: 1px dashed #c6d4cb;
-    border-radius: 6px;
-    color: #456454;
-    background: transparent;
-    font-size: 12px;
-}
-
-.blend-dot {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: #c5d2c9;
-}
-
-.blend-word {
-    padding: 10px 0;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: #456454;
-    font: 14px var(--font-ui);
-}
-
-.blend-word b {
-    margin-left: auto;
-    color: #d9775d;
-    font: 700 22px var(--font-board);
-}
-
-.blend-controls {
-    display: flex;
-    gap: 7px;
-}
-
-.blend-controls button {
-    padding: 7px 9px;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    border: 1px solid #e4ebe6;
-    border-radius: 4px;
-    background: #f7faf7;
-    color: #63816f;
-    font-size: 12px;
 }
 
 .modal-scrim {
@@ -3711,12 +3576,6 @@ kbd {
         left: 7px;
         top: 10px;
     }
-
-    .blend-panel {
-        right: 8px;
-        top: 10px;
-        width: 226px;
-    }
 }
 
 @media print {
@@ -3730,7 +3589,7 @@ kbd {
     .board-toolbar,
     .page-dock,
     .background-panel,
-    .blend-panel,
+    .blending-board,
     .board-layout {
         display: none !important;
     }
@@ -4030,4 +3889,178 @@ kbd {
     display: grid;
     gap: 3px;
     min-width: 0;
+}
+
+.blending-board {
+    position: absolute;
+    z-index: 6;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: #f4f4f2;
+    user-select: none;
+    touch-action: none;
+}
+
+.blending-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    background: white;
+}
+
+.blending-tabs button:not(.blending-close) {
+    flex: 1;
+    padding: 9px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: #087f7b;
+    color: #fff;
+    font: 13px var(--font-ui);
+}
+
+.blending-tabs button.active {
+    background: #006b68;
+    color: #fff;
+    box-shadow: inset 0 0 0 2px #fff;
+    font-weight: 600;
+}
+
+.blending-tabs button:disabled:not(.active) {
+    cursor: not-allowed;
+    opacity: .75;
+}
+
+.blending-close {
+    width: 34px;
+    border: 0;
+    background: transparent;
+    color: #555;
+}
+
+.blending-tray {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 12px 12px;
+    background: white;
+    box-shadow: 0 2px 6px #0000001a;
+}
+
+.blending-letters,
+.blending-digraphs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 10px;
+    background: #f3f3f3;
+}
+
+.blending-letters {
+    max-width: 780px;
+}
+
+.blending-digraphs {
+    max-width: 330px;
+    align-content: flex-start;
+}
+
+.tray-tile,
+.canvas-tile {
+    border: 2px solid #333;
+    border-radius: 7px;
+    color: #111;
+    font-family: var(--font-board);
+    font-weight: 600;
+}
+
+.tray-tile {
+    width: 56px;
+    height: 46px;
+    font-size: 19px;
+    cursor: grab;
+    touch-action: none;
+}
+
+.consonant {
+    background: #fff;
+}
+
+.vowel {
+    background: #fff9c4;
+}
+
+.canvas-tile {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 50px;
+    cursor: grab;
+    box-shadow: 0 4px 0 #0002;
+}
+
+.canvas-tile.dragging {
+    cursor: grabbing;
+    box-shadow: 0 8px 14px #0003;
+}
+
+.drag-ghost {
+    position: fixed;
+    z-index: 100;
+    pointer-events: none;
+    opacity: .9;
+}
+
+.blending-canvas {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    background-color: #006b68;
+}
+
+.blending-hint {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #d4efed;
+    font: 16px var(--font-ui);
+    pointer-events: none;
+}
+
+.blending-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: white;
+    color: #777;
+    font: 12px var(--font-ui);
+}
+
+.blending-footer button {
+    padding: 7px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    border-radius: 6px;
+    background: #006b68;
+    color: #fff;
+}
+
+.blending-footer button:disabled {
+    opacity: .5;
+}
+
+@media (max-width: 900px) {
+    .blending-tray {
+        flex-direction: column;
+    }
+
+    .blending-tabs button:not(.blending-close) {
+        font-size: 10px;
+    }
 }
