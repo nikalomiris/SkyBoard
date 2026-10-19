@@ -1567,7 +1567,7 @@ kbd {
     align-items: center;
     border-bottom: 1px solid #e1e7e3;
     background: #fff;
-    z-index: 3;
+    z-index: 7;
 }
 
 .board-toolbar.student-view-toolbar {
@@ -3894,10 +3894,13 @@ kbd {
 .blending-board {
     position: absolute;
     z-index: 6;
-    inset: 0;
+    inset: 14px;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    border-radius: 14px;
     background: #f4f4f2;
+    box-shadow: 0 0 0 1px #0000001f, 0 18px 48px #0000004d, 0 4px 14px #00000033;
     user-select: none;
     touch-action: none;
 }

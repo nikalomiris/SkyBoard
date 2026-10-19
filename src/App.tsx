@@ -89,6 +89,12 @@ function App() {
     const [showPageDirectory, setShowPageDirectory] = useState(false)
     const [showBlend, setShowBlend] = useState(false)
     const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
+
+    // The blending board is a scratch space: reset it whenever a lesson is opened, switched or closed.
+    useEffect(() => {
+        setBlendTiles([])
+        setShowBlend(false)
+    }, [openLesson?.id])
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
