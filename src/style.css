@@ -3983,6 +3983,7 @@ kbd {
 
 .blending-tray {
     display: flex;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
     padding: 10px 12px 12px;
@@ -3990,14 +3991,27 @@ kbd {
     box-shadow: 0 2px 6px #0000001a;
 }
 
+.blending-letter-groups {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
 .blending-letters,
-.blending-digraphs {
+.blending-digraphs,
+.blending-glued-sounds {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     padding: 6px;
     border-radius: 10px;
     background: #f3f3f3;
+}
+
+.blending-glued-sounds {
+    padding: 0;
+    background: transparent;
 }
 
 .blending-letters {
@@ -4024,6 +4038,12 @@ kbd {
     font-size: 19px;
     cursor: grab;
     touch-action: none;
+}
+
+.glued-sound-tile {
+    width: 36px;
+    height: 32px;
+    font-size: 14px;
 }
 
 .consonant {

@@ -7,7 +7,8 @@ export type BlendTile = { id: string; text: string; x: number; y: number }
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
-const tabs = ['Basic Tiles', 'Glued Sounds', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels']
+const gluedSoundTiles = ['ing', 'ang', 'ong', 'ung', 'ink', 'ank', 'onk', 'unk']
+const tabs = ['Basic Tiles', 'Glued Sounds', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels'] as const
 const boardColors = [
     { name: 'Sky', color: '#81a6c6' },
     { name: 'Lavender', color: '#c9bce8' },
@@ -36,6 +37,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
 }) {
     const canvasRef = useRef<HTMLDivElement>(null)
     const [drag, setDrag] = useState<Drag | null>(null)
+    const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Basic Tiles')
     const nextId = useRef(0)
     const [boardColor, setBoardColor] = useState(() => {
         const stored = window.localStorage.getItem(colorStorageKey)
@@ -104,12 +106,17 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
 
     return <div className="blending-board" style={{ ['--board-accent' as string]: boardColor }}>
         <div className="blending-tabs">
-            {tabs.map((tab, index) => <button key={tab} className={index === 0 ? 'active' : ''} disabled={index !== 0}>{tab}</button>)}
+            {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} disabled={tab !== 'Basic Tiles' && tab !== 'Glued Sounds'} onClick={() => setActiveTab(tab)}>{tab}</button>)}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
         </div>
         <div className="blending-tray">
-            <div className="blending-letters">
-                {letterTiles.map((text) => <button key={text} className={`tray-tile ${tileClass(text)}`} aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+            <div className="blending-letter-groups">
+                <div className="blending-letters">
+                    {letterTiles.map((text) => <button key={text} className={`tray-tile ${tileClass(text)}`} aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+                </div>
+                {activeTab === 'Glued Sounds' && <div className="blending-glued-sounds" role="group" aria-label="Glued sounds">
+                    {gluedSoundTiles.map((text) => <button key={text} className="tray-tile consonant glued-sound-tile" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+                </div>}
             </div>
             <div className="blending-digraphs">
                 {digraphTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
