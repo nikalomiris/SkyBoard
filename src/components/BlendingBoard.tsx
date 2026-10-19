@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
-import { Trash2, X } from 'lucide-react'
+import { Check, Trash2, X } from 'lucide-react'
 
 export type BlendTile = { id: string; text: string; x: number; y: number }
 
@@ -8,6 +8,17 @@ const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
 const tabs = ['Basic Tiles', 'Glued Sounds', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels']
+const boardColors = [
+    { name: 'Sky', color: '#81a6c6' },
+    { name: 'Lavender', color: '#c9bce8' },
+    { name: 'Rose', color: '#e9bfd0' },
+    { name: 'Peach', color: '#f4c6b2' },
+    { name: 'Butter', color: '#f2dfa4' },
+    { name: 'Sage', color: '#bfd8c2' },
+    { name: 'Aqua', color: '#b4d9d8' },
+    { name: 'Periwinkle', color: '#c2c9e8' },
+]
+const colorStorageKey = 'skyboard:blending-board-color'
 const TILE_W = 104
 const TILE_H = 104
 const SNAP_DISTANCE = 40
@@ -26,6 +37,10 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
     const canvasRef = useRef<HTMLDivElement>(null)
     const [drag, setDrag] = useState<Drag | null>(null)
     const nextId = useRef(0)
+    const [boardColor, setBoardColor] = useState(() => {
+        const stored = window.localStorage.getItem(colorStorageKey)
+        return boardColors.some((option) => option.color === stored) ? stored! : '#81a6c6'
+    })
     const tilesRef = useRef(tiles)
     tilesRef.current = tiles
 
@@ -87,7 +102,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
         }
     }
 
-    return <div className="blending-board">
+    return <div className="blending-board" style={{ ['--board-accent' as string]: boardColor }}>
         <div className="blending-tabs">
             {tabs.map((tab, index) => <button key={tab} className={index === 0 ? 'active' : ''} disabled={index !== 0}>{tab}</button>)}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
@@ -107,6 +122,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
         <div className="blending-footer">
             <button onClick={() => setTiles([])} disabled={tiles.length === 0}><Trash2 size={15} /> Clear board</button>
             <span>Drag a tile off the board to remove it</span>
+            <div className="accent-swatches" role="radiogroup" aria-label="Canvas color">{boardColors.map((option) => <button key={option.color} role="radio" aria-checked={boardColor === option.color} className={boardColor === option.color ? 'selected' : ''} style={{ background: option.color }} title={`${option.name} canvas`} aria-label={`${option.name} canvas`} onClick={() => { setBoardColor(option.color); window.localStorage.setItem(colorStorageKey, option.color) }}>{boardColor === option.color && <Check size={14} />}</button>)}</div>
         </div>
         {drag && drag.tileId === null && <div className={`canvas-tile ${tileClass(drag.text)} drag-ghost`} style={{ left: drag.clientX - drag.offsetX, top: drag.clientY - drag.offsetY, width: TILE_W, height: TILE_H }}>{drag.text}</div>}
     </div>

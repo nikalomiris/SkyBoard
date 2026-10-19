@@ -1426,9 +1426,9 @@ function App() {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
                                             return <g className="selection-frame">
-                                                <rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="#56866c" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />
+                                                <rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="var(--accent)" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />
                                                 {selectedItem.type === 'shape' && selectedItem.shape !== 'circle' && <>
-                                                    <line x1={centerX} y1={bounds.top - 5} x2={centerX} y2={bounds.top - 19} stroke="#56866c" strokeWidth="2" pointerEvents="none" />
+                                                    <line x1={centerX} y1={bounds.top - 5} x2={centerX} y2={bounds.top - 19} stroke="var(--accent)" strokeWidth="2" pointerEvents="none" />
                                                     <foreignObject x={centerX - 12} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Rotate shape" aria-label="Rotate shape" onPointerDown={rotateFromHandle}><RotateCw size={13} /></button></foreignObject>
                                                 </>}
                                                 <rect className="selection-move-handle" x={centerX - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} />
