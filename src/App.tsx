@@ -129,6 +129,8 @@ function App() {
     const liveReceivedRef = useRef(false)
     const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
+    const [copyingLessonId, setCopyingLessonId] = useState<string | null>(null)
+    const [copyDestinationFolder, setCopyDestinationFolder] = useState('')
     const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
     const [postitDraft, setPostitDraft] = useState<{ id?: string; left: number; top: number; text: string } | null>(null)
     const lastItemTapRef = useRef<{ id: string; time: number } | null>(null)
@@ -508,6 +510,8 @@ function App() {
     }, [liveLessonPage, openLesson?.id])
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
     const coverEditorLesson = lessons.find((lesson) => lesson.id === coverEditorLessonId) ?? null
+    const copyingLesson = lessons.find((lesson) => lesson.id === copyingLessonId) ?? null
+    const copyDestinationFolders = getOrderedFolders([...new Set([...folders, ...(copyingLesson ? [copyingLesson.folder] : [])])])
     const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
     const orderedFolders = getOrderedFolders(folders)
     const visibleSubfolders = isStudentFolderSelected ? folders.filter((folder) => getFolderParent(folder) === activeFolder) : []
@@ -672,9 +676,17 @@ function App() {
         if (error) console.error(error.message)
     }
 
+    function touchOpenLesson() {
+        if (!openLesson || studentView) return
+        const lessonId = openLesson.id
+        const updatedAt = Date.now()
+        setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, updated: 'Just now', updatedAt } : lesson))
+    }
+
     function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
         const recordHistory = options?.recordHistory ?? true
         if (studentView) studentEditPendingRef.current = true
+        touchOpenLesson()
         setItemsByPage((previous) => {
             const existing = previous[currentPageKey] ?? []
             const resolved = typeof nextItems === 'function' ? nextItems(existing) : nextItems
@@ -696,6 +708,7 @@ function App() {
         entry.past = entry.past.slice(0, -1)
         entry.future = [...entry.future, currentItems]
         if (studentView) studentEditPendingRef.current = true
+        touchOpenLesson()
         setItemsByPage((previous) => ({ ...previous, [currentPageKey]: previousState }))
         setSelectedItemId(null)
         setHistoryTick((tick) => tick + 1)
@@ -708,6 +721,7 @@ function App() {
         entry.future = entry.future.slice(0, -1)
         entry.past = [...entry.past, currentItems]
         if (studentView) studentEditPendingRef.current = true
+        touchOpenLesson()
         setItemsByPage((previous) => ({ ...previous, [currentPageKey]: nextState }))
         setSelectedItemId(null)
         setHistoryTick((tick) => tick + 1)
@@ -816,8 +830,14 @@ function App() {
         })
     }
 
-    function duplicateLesson(lesson: Lesson) {
-        const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
+    function openDuplicateLessonDialog(lesson: Lesson) {
+        setCopyingLessonId(lesson.id)
+        setCopyDestinationFolder(lesson.folder)
+        setShowFileMenu(null)
+    }
+
+    function duplicateLesson(lesson: Lesson, destinationFolder: string) {
+        const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, folder: destinationFolder, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
         const copiedItems: PageItems = {}
         const copiedBackgrounds: Record<string, string> = {}
         lesson.pages.forEach((_, index) => {
@@ -829,7 +849,7 @@ function App() {
         setItemsByPage((previous) => ({ ...previous, ...copiedItems }))
         setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
         setLessons((previous) => [copy, ...previous])
-        setShowFileMenu(null)
+        setCopyingLessonId(null)
     }
 
     function deleteLesson(lessonId: string) {
@@ -1501,6 +1521,7 @@ function App() {
 
     function setPageBackground(value: string) {
         if (!openLesson) return
+        touchOpenLesson()
         setBackgroundsByPage((previous) => {
             if (backgroundScope === 'all') {
                 const next = { ...previous }
@@ -1767,7 +1788,7 @@ function App() {
                                                 <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
                                                 {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
                                                     <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
-                                                    <button onClick={() => duplicateLesson(lesson)}><Copy size={15} /> Make a copy</button>
+                                                    <button onClick={() => openDuplicateLessonDialog(lesson)}><Copy size={15} /> Make a copy</button>
                                                     <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
                                                     <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
                                                     <div className="menu-divider" />
@@ -1999,6 +2020,34 @@ function App() {
                         <div className="new-lesson-actions">
                             <button type="button" className="cancel-button" onClick={() => setShowNewLesson(false)}>Cancel</button>
                             <button type="submit" className="confirm-button" disabled={!newLessonTitle.trim()}><Plus size={15} /> Create lesson</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {copyingLesson && (
+                <div className="modal-scrim" onClick={() => setCopyingLessonId(null)}>
+                    <form
+                        className="share-modal new-lesson-modal"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="copy-lesson-title"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => { if (event.key === 'Escape') setCopyingLessonId(null) }}
+                        onSubmit={(event) => { event.preventDefault(); duplicateLesson(copyingLesson, copyDestinationFolder) }}
+                    >
+                        <button type="button" className="modal-close" onClick={() => setCopyingLessonId(null)} aria-label="Close"><X size={18} /></button>
+                        <div className="share-modal-icon"><Copy size={20} /></div>
+                        <h2 id="copy-lesson-title">Make a copy</h2>
+                        <p>Choose where to create a copy of “{copyingLesson.title}”.</p>
+                        <label className="new-lesson-field">
+                            Student or folder
+                            <select value={copyDestinationFolder} onChange={(event) => setCopyDestinationFolder(event.target.value)}>
+                                {copyDestinationFolders.map((folder) => <option key={folder} value={folder}>{getFolderParent(folder) ? `${'  '.repeat(folder.split(' / ').length - 1)}${getFolderName(folder)}` : folder}</option>)}
+                            </select>
+                        </label>
+                        <div className="new-lesson-actions">
+                            <button type="button" className="cancel-button" onClick={() => setCopyingLessonId(null)}>Cancel</button>
+                            <button type="submit" className="confirm-button" disabled={!copyDestinationFolder}><Copy size={15} /> Make a copy</button>
                         </div>
                     </form>
                 </div>

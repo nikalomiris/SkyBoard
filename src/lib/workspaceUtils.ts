@@ -65,10 +65,16 @@ export function folderIsWithin(folder: string, parent: string) {
 }
 
 export function getOrderedFolders(folders: string[]) {
-    return folders.filter((folder) => !getFolderParent(folder)).flatMap((parent) => [
-        parent,
-        ...folders.filter((folder) => getFolderParent(folder) === parent),
-    ])
+    const childrenByParent = new Map<string, string[]>()
+    for (const folder of folders) {
+        const parent = getFolderParent(folder)
+        if (parent) childrenByParent.set(parent, [...(childrenByParent.get(parent) ?? []), folder])
+    }
+    const addFolderAndChildren = (folder: string): string[] => [
+        folder,
+        ...(childrenByParent.get(folder) ?? []).flatMap(addFolderAndChildren),
+    ]
+    return folders.filter((folder) => !getFolderParent(folder)).flatMap(addFolderAndChildren)
 }
 
 export function readStudentLessons() {
