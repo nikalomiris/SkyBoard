@@ -104,6 +104,8 @@ function App() {
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
+    const [shareToken, setShareToken] = useState('')
+    const liveReceivedRef = useRef(false)
     const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
@@ -212,17 +214,20 @@ function App() {
         void getSharedLesson(token).then((shared) => {
             if (!active) return
             const pageNames = shared.pages.length ? shared.pages.map((page) => page.name) : ['Page 1']
-            setOpenLesson({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' })
-            setPages(pageNames)
-            setPageIndex(0)
+            const liveStarted = liveReceivedRef.current
+            setOpenLesson((previous) => ({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: liveStarted && previous ? previous.pages : pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' }))
+            if (!liveStarted) {
+                setPages(pageNames)
+                setPageIndex(0)
+            }
             const sharedItems: PageItems = {}
             const sharedBackgrounds: Record<string, string> = {}
             for (const page of shared.pages) {
                 sharedItems[`${shared.lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
                 sharedBackgrounds[`${shared.lesson.id}:${page.position}`] = page.background
             }
-            setItemsByPage(sharedItems)
-            setBackgroundsByPage(sharedBackgrounds)
+            setItemsByPage((previous) => ({ ...sharedItems, ...previous }))
+            setBackgroundsByPage((previous) => ({ ...sharedBackgrounds, ...previous }))
             setSharedLessonStatus('ready')
         }).catch((error: unknown) => {
             if (!active) return
@@ -243,6 +248,69 @@ function App() {
     const canUndo = Boolean(currentHistory?.past.length)
     const canRedo = Boolean(currentHistory?.future.length)
     const isMockWorkspace = !isSupabaseConfigured && !studentView
+
+    const liveStateRef = useRef({ pageIndex, pages, items: currentItems, background })
+    liveStateRef.current = { pageIndex, pages, items: currentItems, background }
+    const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
+    const liveSubscribedRef = useRef(false)
+    const broadcastLiveState = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'state', payload: liveStateRef.current })
+    }
+
+    // Teacher: publish the current page (and its content) to every student on the shared link.
+    useEffect(() => {
+        if (!supabase || studentView || !shareToken) return
+        const channel = supabase.channel(`lesson-live:${shareToken}`)
+        liveChannelRef.current = channel
+        liveSubscribedRef.current = false
+        channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
+        channel.subscribe((status) => {
+            liveSubscribedRef.current = status === 'SUBSCRIBED'
+            if (status === 'SUBSCRIBED') broadcastLiveState()
+        })
+        return () => {
+            liveSubscribedRef.current = false
+            liveChannelRef.current = null
+            void supabase?.removeChannel(channel)
+        }
+    }, [shareToken, studentView])
+    useEffect(() => {
+        if (!shareToken || studentView) return
+        const timeout = window.setTimeout(broadcastLiveState, 120)
+        return () => window.clearTimeout(timeout)
+    }, [shareToken, studentView, pageIndex, pages, currentItems, background])
+
+    // Student: follow the teacher's page and show its live content.
+    useEffect(() => {
+        const client = supabase
+        const token = new URLSearchParams(window.location.search).get('token')
+        if (!client || !studentView || !token) return
+        const channel = client.channel(`lesson-live:${token}`)
+        channel.on('broadcast', { event: 'state' }, ({ payload }) => {
+            const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string }
+            if (!live || !Array.isArray(live.pages) || !Array.isArray(live.items)) return
+            liveReceivedRef.current = true
+            const visible = live.items.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
+            setPages(live.pages)
+            setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
+            setPageIndex(live.pageIndex)
+            setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background })
+            setSelectedItemId(null)
+        })
+        channel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') void channel.send({ type: 'broadcast', event: 'hello', payload: {} })
+        })
+        return () => { void client.removeChannel(channel) }
+    }, [studentView])
+    const [liveLessonPage, setLiveLessonPage] = useState<{ index: number; items: BoardItem[]; background: string } | null>(null)
+    useEffect(() => {
+        if (!liveLessonPage || !openLesson) return
+        const key = `${openLesson.id}:${liveLessonPage.index}`
+        setItemsByPage((previous) => ({ ...previous, [key]: liveLessonPage.items }))
+        setBackgroundsByPage((previous) => ({ ...previous, [key]: liveLessonPage.background }))
+    }, [liveLessonPage, openLesson?.id])
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
     const coverEditorLesson = lessons.find((lesson) => lesson.id === coverEditorLessonId) ?? null
     const isStudentFolderSelected = folders.includes(activeFolder) && !getFolderParent(activeFolder)
@@ -626,6 +694,7 @@ function App() {
         setShareLinkUrl('')
         setShareLinkLoading(true)
         void createLessonShareLink(openLesson.id).then(({ token }) => {
+            setShareToken(token)
             setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&token=${token}`)
         }).catch((error: unknown) => {
             setShareLinkError(error instanceof Error ? error.message : 'Unable to create a student link.')
