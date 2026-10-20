@@ -1664,6 +1664,30 @@ function App() {
                 </div>
             </header>
 
+            {!studentView && openLesson && waitingInvites.length > 0 && (
+                <section className="admission-banner" aria-label="Student admission requests" aria-live="polite">
+                    <div className="admission-banner-summary">
+                        <span className="admission-banner-icon"><Users size={18} /></span>
+                        <div>
+                            <strong>Waiting for admission</strong>
+                            <span>{waitingInvites.length} student{waitingInvites.length === 1 ? ' is' : 's are'} waiting to join</span>
+                        </div>
+                    </div>
+                    <div className="admission-banner-requests">
+                        {waitingInvites.map((invite) => (
+                            <div className="admission-request" key={invite.id}>
+                                <span className="invite-dot" style={{ background: invite.color }} />
+                                <strong className="admission-request-name">{invite.label}</strong>
+                                <div className="admission-request-actions">
+                                    <button type="button" className="admission-admit" aria-label={`Admit ${invite.label}`} onClick={() => void setInviteState(invite, 'admitted')}>Admit</button>
+                                    <button type="button" className="admission-deny" aria-label={`Deny ${invite.label}`} onClick={() => void setInviteState(invite, 'removed')}>Deny</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
+
             {!openLesson ? (
                 <div className="library-layout">
                     <aside className="sidebar">

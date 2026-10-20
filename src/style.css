@@ -4685,6 +4685,133 @@ kbd {
     animation: pulse-dot 1s ease-in-out infinite;
 }
 
+.admission-banner {
+    flex: none;
+    display: grid;
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 10px 24px;
+    border-bottom: 1px solid #e7bf69;
+    background: #fff7e3;
+    box-shadow: 0 2px 8px rgba(100, 72, 20, .08);
+}
+
+.admission-banner-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.admission-banner-icon {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: #f6e4b9;
+    color: #805b16;
+}
+
+.admission-banner-summary>div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.admission-banner-summary strong {
+    color: #684a12;
+    font-size: 13px;
+}
+
+.admission-banner-summary span:not(.admission-banner-icon) {
+    color: #806c48;
+    font-size: 12px;
+}
+
+.admission-banner-requests {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.admission-request {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 8px;
+    border: 1px solid #ead8ae;
+    border-radius: 8px;
+    background: #fffdfa;
+}
+
+.admission-request-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 180px;
+    overflow: hidden;
+    color: #3d4a5c;
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admission-request-actions {
+    flex: none;
+    display: flex;
+    gap: 6px;
+}
+
+.admission-request-actions button {
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.admission-admit {
+    background: #2e9d68;
+    color: white;
+}
+
+.admission-admit:hover {
+    background: #247d53;
+}
+
+.admission-deny {
+    border-color: #e8c9c0 !important;
+    background: white;
+    color: #b7463e;
+}
+
+.admission-deny:hover {
+    background: #fff0ec;
+}
+
+@media (max-width: 720px) {
+    .admission-banner {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 10px 13px;
+    }
+
+    .admission-banner-summary {
+        gap: 8px;
+    }
+
+    .admission-banner-icon {
+        width: 30px;
+        height: 30px;
+    }
+}
+
 .student-menu {
     min-width: 260px;
 }
