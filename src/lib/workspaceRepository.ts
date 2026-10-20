@@ -399,3 +399,8 @@ export async function getSharedLesson(token: string): Promise<SharedLessonData> 
     if (!result.data) throw new Error('This student link is invalid or has expired.')
     return result.data as SharedLessonData
 }
+
+export async function endLessonShare(lessonId: string): Promise<void> {
+    const result = await getClient().rpc('end_lesson_share', { p_lesson_id: lessonId })
+    if (result.error) throw new Error(result.error.message)
+}

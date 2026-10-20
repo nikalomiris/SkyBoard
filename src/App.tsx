@@ -6,7 +6,7 @@ import {
     Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, X, Lock, Unlock
+    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
@@ -15,7 +15,7 @@ import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { createLessonShareLink, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import { createLessonShareLink, endLessonShare, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
     folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
@@ -50,8 +50,10 @@ const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited'
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
-    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
+    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error' | 'removed'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
     const [sharedLessonError, setSharedLessonError] = useState('')
+    const removedRef = useRef(false)
+    const [removedReason, setRemovedReason] = useState<'removed' | 'ended'>('removed')
     const [authSession, setAuthSession] = useState<Session | null>(null)
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
     const [showProfileSettings, setShowProfileSettings] = useState(false)
@@ -61,7 +63,6 @@ function App() {
     const [workspaceError, setWorkspaceError] = useState('')
     const [workspaceRetry, setWorkspaceRetry] = useState(0)
     const [cloudSaveStatus, setCloudSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
-    const [savedNoticeVisible, setSavedNoticeVisible] = useState(true)
     const [cloudSaveError, setCloudSaveError] = useState('')
     const [lessons, setLessons] = useState(() => isSupabaseConfigured ? [] : readStudentLessons())
     const [folders, setFolders] = useState(() => isSupabaseConfigured ? [] : readStudentFolders())
@@ -134,15 +135,18 @@ function App() {
     const [showImageSearch, setShowImageSearch] = useState(false)
     const [imageQuery, setImageQuery] = useState('')
     const [imageUrl, setImageUrl] = useState('')
+    const [imageResults, setImageResults] = useState<{ id: string; thumb: string; src: string; title: string }[]>([])
+    const [imageSearching, setImageSearching] = useState(false)
+    const [imageSearchError, setImageSearchError] = useState('')
     const [showFileMenu, setShowFileMenu] = useState<string | null>(null)
     const [studentCount, setStudentCount] = useState(0)
     const [studentLocked, setStudentLocked] = useState(false)
+    const [showStudentMenu, setShowStudentMenu] = useState(false)
     const isFollowing = studentCount > 0
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null)
     const [folderMenu, setFolderMenu] = useState<string | null>(null)
     const [printing, setPrinting] = useState(false)
-    const [toast, setToast] = useState('')
     const [drawing, setDrawing] = useState(false)
     const [currentPoints, setCurrentPoints] = useState('')
     const [lineDraft, setLineDraft] = useState<{ start: Point; end: Point } | null>(null)
@@ -228,6 +232,7 @@ function App() {
         }
         void getSharedLesson(token).then((shared) => {
             if (!active) return
+            if (removedRef.current) return
             const pageNames = shared.pages.length ? shared.pages.map((page) => page.name) : ['Page 1']
             const liveStarted = liveReceivedRef.current
             setOpenLesson((previous) => ({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: liveStarted && previous ? previous.pages : pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' }))
@@ -246,6 +251,12 @@ function App() {
             setSharedLessonStatus('ready')
         }).catch((error: unknown) => {
             if (!active) return
+            if (error instanceof Error && error.message.includes('LESSON_ENDED')) {
+                removedRef.current = true
+                setRemovedReason('ended')
+                setSharedLessonStatus('removed')
+                return
+            }
             setSharedLessonError(error instanceof Error ? error.message : 'Unable to load this student link.')
             setSharedLessonStatus('error')
         })
@@ -397,6 +408,14 @@ function App() {
             setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background })
             setSelectedItemId(null)
         })
+        channel.on('broadcast', { event: 'kick' }, ({ payload }) => {
+            setRemovedReason((payload as { reason?: string })?.reason === 'ended' ? 'ended' : 'removed')
+            liveSubscribedRef.current = false
+            liveChannelRef.current = null
+            void client.removeChannel(channel)
+            removedRef.current = true
+            setSharedLessonStatus('removed')
+        })
         channel.on('broadcast', { event: 'lock' }, ({ payload }) => setStudentLocked(Boolean((payload as { locked?: boolean })?.locked)))
         channel.on('broadcast', { event: 'blend' }, ({ payload }) => {
             const blend = payload as { open: boolean; tiles: BlendTile[]; color: string | null }
@@ -441,13 +460,8 @@ function App() {
     })
 
     useEffect(() => {
-        try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { notify('Clipboard is too large to keep after a refresh') }
+        try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { /* clipboard stays in memory only */ }
     }, [clipboardPages])
-    useEffect(() => {
-        if (cloudSaveStatus !== 'saved') return setSavedNoticeVisible(true)
-        const timeout = window.setTimeout(() => setSavedNoticeVisible(false), 3000)
-        return () => window.clearTimeout(timeout)
-    }, [cloudSaveStatus])
     useEffect(() => {
         document.querySelector('.page-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     }, [pageIndex, pages.length])
@@ -588,15 +602,10 @@ function App() {
         return () => window.removeEventListener('keydown', deleteSelected)
     }, [selectedItemId, currentPageKey, studentView])
 
-    function notify(message: string) {
-        setToast(message)
-        window.setTimeout(() => setToast(''), 2400)
-    }
-
     async function signOut() {
         if (!supabase) return
         const { error } = await supabase.auth.signOut()
-        if (error) notify(error.message)
+        if (error) console.error(error.message)
     }
 
     function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
@@ -757,13 +766,11 @@ function App() {
         setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
         setLessons((previous) => [copy, ...previous])
         setShowFileMenu(null)
-        notify('Lesson duplicated')
     }
 
     function deleteLesson(lessonId: string) {
         setLessons((previous) => previous.filter((lesson) => lesson.id !== lessonId))
         setShowFileMenu(null)
-        notify('Lesson moved to trash')
     }
 
     function openTagEditor(lesson: Lesson) {
@@ -796,6 +803,20 @@ function App() {
         if (!openLesson) return
         setRenameValue(openLesson.title)
         setRenamingTitle(true)
+    }
+
+    async function removeStudent(reason: 'removed' | 'ended' = 'removed') {
+        const channel = liveChannelRef.current
+        const lessonId = openLesson?.id
+        if (!channel || !lessonId || !window.confirm(reason === 'ended' ? 'End the lesson? Everyone will be disconnected and the current student link will stop working.' : `Remove ${studentCount === 1 ? 'the student' : 'all students'}? They will lose access and the current student link will stop working.`)) return
+        try {
+            await channel.send({ type: 'broadcast', event: 'kick', payload: { reason } })
+            if (isSupabaseConfigured) await endLessonShare(lessonId)
+        } catch (error) {
+            console.error(error)
+        }
+        setShareToken('')
+        setShareLinkUrl('')
     }
 
     function openShareDialog() {
@@ -882,8 +903,6 @@ function App() {
         setFolders((previous) => previous.filter((name) => !deletedFolders.includes(name)))
         setFolderMenu(null)
         if (activeFolder !== 'All lessons' && activeFolder !== 'Shared with me' && folderIsWithin(activeFolder, folder)) setActiveFolder('All lessons')
-        if (parent) notify(`Folder deleted; lessons moved to ${parent}`)
-        else notify(`Student deleted with ${deletedLessons.length} ${deletedLessons.length === 1 ? 'lesson' : 'lessons'}`)
     }
 
     function confirmDelete() {
@@ -897,14 +916,13 @@ function App() {
         setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, folder } : lesson))
         setDraggingId(null)
         setShowFileMenu(null)
-        notify(`Moved to ${folder}`)
     }
 
     function createFolder(activate = true, requestedName: string) {
         const name = requestedName.trim()
         if (!name) return
-        if (name.includes(folderSeparator)) return notify('Use Add subfolder to create a folder inside a student folder')
-        if (folders.includes(name)) return notify('A folder with that name already exists')
+        if (name.includes(folderSeparator)) return
+        if (folders.includes(name)) return
         setFolders((previous) => [...previous, name])
         if (activate) setActiveFolder(name)
         return name
@@ -928,13 +946,12 @@ function App() {
         const parent = subfolderParent
         const name = subfolderName.trim()
         if (!parent || !name) return
-        if (name.includes(folderSeparator)) return notify('Subfolders can’t contain another folder path')
+        if (name.includes(folderSeparator)) return
         const path = `${parent}${folderSeparator}${name}`
-        if (folders.includes(path)) return notify('A subfolder with that name already exists')
+        if (folders.includes(path)) return
         setFolders((previous) => [...previous, path])
         setSubfolderParent(null)
         setSubfolderName('')
-        notify(`Subfolder added to ${parent}`)
     }
 
     function addFolderToNewLesson() {
@@ -997,7 +1014,6 @@ function App() {
 
     function duplicatePage() {
         insertPage(pageIndex + 1, `${pages[pageIndex]} copy`, currentItems, backgroundsByPage[currentPageKey])
-        notify('Page duplicated')
     }
 
     function copyPage() {
@@ -1007,17 +1023,15 @@ function App() {
             items: structuredClone(currentItems), background: backgroundsByPage[currentPageKey],
         }
         setClipboardPages((previous) => [entry, ...previous].slice(0, 20))
-        notify('Page copied to clipboard')
     }
 
     function pasteClipboardPage(entry: ClipboardPage) {
         insertPage(pageIndex + 1, entry.name, entry.items, entry.background)
         setShowPasteDialog(false)
-        notify('Page pasted')
     }
 
     function deletePage() {
-        if (pages.length <= 1) return notify('A lesson needs at least one page')
+        if (pages.length <= 1) return
         if (!openLesson) return
         const lessonId = openLesson.id
         const nextPages = pages.filter((_, index) => index !== pageIndex)
@@ -1036,7 +1050,6 @@ function App() {
         updateLessonPages(nextPages)
         const nextIndex = Math.max(0, pageIndex - 1)
         setPageIndex(nextIndex)
-        notify('Page deleted')
     }
 
     function coordinates(event: { clientX: number; clientY: number }) {
@@ -1480,6 +1493,7 @@ function App() {
     }
     if (isSupabaseConfigured && studentView) {
         if (sharedLessonStatus === 'loading') return <AuthScreen loading loadingTitle="Loading your lesson" loadingMessage="Fetching this lesson from your teacher's link." />
+        if (sharedLessonStatus === 'removed') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>{removedReason === 'ended' ? 'This lesson has ended' : 'You’ve been removed from this lesson'}</h1><p className="auth-intro">{removedReason === 'ended' ? 'Your teacher has ended the lesson. Thanks for joining! Ask them for a new link to join another session.' : 'Your teacher ended your access. If you think this is a mistake, please ask them for a new link.'}</p></section></main>
         if (sharedLessonStatus === 'error') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">{sharedLessonError}</p></section></main>
         if (!openLesson) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">We couldn’t find a lesson for this link.</p></section></main>
     }
@@ -1488,18 +1502,16 @@ function App() {
         <div className="app-shell">
             <header className="topbar">
                 <button className="brand" onClick={() => !studentView && setOpenLesson(null)} aria-label="Go to SkyBoard home"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></button>
-                <div className="topbar-center"><span className="workspace-dot" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : <span className="crumb-current">My workspace</span>}</div>
+                <div className="topbar-center"><span className={`workspace-dot ${authSession && !studentView ? cloudSaveStatus : 'saved'}`} role="status" title={authSession && !studentView ? (cloudSaveStatus === 'saving' ? 'Saving…' : cloudSaveStatus === 'error' ? `Not saved: ${cloudSaveError}` : 'All changes saved') : 'All changes saved'} aria-label="Save status" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : <span className="crumb-current">My workspace</span>}</div>
                 <div className="topbar-actions">
                     {openLesson ? <>
-                        {!studentView && <><button className={`follow-button ${isFollowing ? 'following' : ''}`} title={isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => notify(isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student has opened the share link yet')}><Users size={16} />{isFollowing ? 'Student connected' : 'No student'}<span className="online-dot" /></button>
-                        <button className={`follow-button lock-button ${studentLocked ? 'following' : ''}`} aria-pressed={studentLocked} title={studentLocked ? 'Let the student interact again' : 'Lock the student out of the lesson'} onClick={() => setStudentLocked(!studentLocked)}>{studentLocked ? <Lock size={16} /> : <Unlock size={16} />}{studentLocked ? 'Student locked' : 'Lock student'}</button></>}
+                        {!studentView && <div className="student-status-wrap"><button className={`icon-button student-status-button ${isFollowing ? 'connected' : ''} ${isFollowing && studentLocked ? 'locked' : ''}`} aria-haspopup="menu" aria-expanded={showStudentMenu} aria-label={isFollowing ? 'Student connected' : 'No student connected'} title={isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => setShowStudentMenu((open) => !open)}><Users size={17} /><span className="student-status-dot" /></button>{showStudentMenu && <><div className="student-menu-scrim" onClick={() => setShowStudentMenu(false)} /><div className="student-menu" role="menu"><div className="student-menu-status">{isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'}</div><button role="menuitem" onClick={() => { setStudentLocked(!studentLocked); setShowStudentMenu(false) }}>{studentLocked ? <Unlock size={15} /> : <Lock size={15} />}{studentCount > 1 ? (studentLocked ? 'Unlock students' : 'Lock students') : (studentLocked ? 'Unlock student' : 'Lock student')}</button><button role="menuitem" className="danger" disabled={!isFollowing} onClick={() => { setShowStudentMenu(false); void removeStudent() }}><UserX size={15} />{studentCount > 1 ? 'Remove students' : 'Remove student'}</button><button role="menuitem" className="danger" disabled={!shareToken} onClick={() => { setShowStudentMenu(false); void removeStudent('ended') }}><LogOut size={15} />End lesson</button></div></>}</div>}
                         {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
                         {!studentView && <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>}
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
                 </div>
             </header>
-            {authSession && !studentView && (cloudSaveStatus !== 'saved' || savedNoticeVisible) && <div className={`cloud-storage-notice ${cloudSaveStatus === 'error' ? 'error' : ''}`} role="status">{cloudSaveStatus === 'saving' ? 'Saving your workspace…' : cloudSaveStatus === 'error' ? `Cloud save failed: ${cloudSaveError}` : `Saved to Supabase · ${authSession.user.email}`}</div>}
 
             {!openLesson ? (
                 <div className="library-layout">
@@ -1833,9 +1845,8 @@ function App() {
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
-            ~            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); notify('Student link copied'); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
-            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search Google Images, then copy an image address and add it to your page.</p><form className="image-search-form" onSubmit={(event) => { event.preventDefault(); window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageQuery)}`, '_blank', 'noopener,noreferrer') }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" /><button type="submit"><Search size={15} /> Search</button></form><label className="image-url-label">IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
-            {toast && <div className="toast-message"><Check size={15} />{toast}</div>}
+            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
+            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search the web for pictures and click one to add it to your page.</p><form className="image-search-form" onSubmit={async (event) => { event.preventDefault(); const q = imageQuery.trim(); if (!q) return; setImageSearching(true); setImageSearchError(''); try { const response = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(`${q} filetype:bitmap`)}&gsrlimit=30&prop=imageinfo&iiprop=url|mime&iiurlwidth=240&format=json&origin=*`); if (!response.ok) throw new Error('search failed'); const data = await response.json(); const pages = Object.values(data.query?.pages ?? {}) as { pageid: number; index?: number; title: string; imageinfo?: { thumburl?: string; url: string; mime?: string }[] }[]; const results = pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0)).filter((page) => page.imageinfo?.[0] && /^image\/(jpeg|png|webp|gif)$/.test(page.imageinfo[0].mime ?? '')).map((page) => ({ id: String(page.pageid), thumb: page.imageinfo![0].thumburl || page.imageinfo![0].url, src: page.imageinfo![0].url, title: page.title.replace(/^File:/, '').replace(/\.[^.]+$/, '') })); setImageResults(results); if (!results.length) setImageSearchError('No pictures found. Try another word.') } catch { setImageResults([]); setImageSearchError('Could not search right now. Check your connection or paste an image address below.') } finally { setImageSearching(false) } }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" autoFocus /><button type="submit" disabled={imageSearching}><Search size={15} /> {imageSearching ? 'Searching' : 'Search'}</button></form>{imageSearchError && <p className="image-search-error">{imageSearchError}</p>}{imageResults.length > 0 && <div className="image-results">{imageResults.map((result) => <button type="button" key={result.id} className="image-result" title={result.title} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: result.src, label: result.title }); setShowImageSearch(false) }}><img src={result.thumb} alt={result.title} loading="lazy" /></button>)}</div>}<label className="image-url-label">OR PASTE AN IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
         </div>
     )
 }

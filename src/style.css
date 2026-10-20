@@ -112,8 +112,22 @@ input:focus-visible {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #e6ad49;
+    background: #3fb97a;
     margin-right: 2px;
+    transition: background .2s;
+}
+
+.workspace-dot.saving {
+    background: #e6ad49;
+    animation: pulse-dot 1s ease-in-out infinite;
+}
+
+.workspace-dot.error {
+    background: #d64545;
+}
+
+@keyframes pulse-dot {
+    50% { opacity: .35; }
 }
 
 .crumb-link {
@@ -4543,4 +4557,125 @@ kbd {
     margin: 0;
     font-weight: 700;
     text-align: center;
+}
+
+.image-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 12px 0;
+}
+
+.image-result {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f1f1;
+  cursor: pointer;
+  aspect-ratio: 1;
+}
+
+.image-result:hover {
+  border-color: #4f7cff;
+}
+
+.image-result img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-search-error {
+  color: #b3261e;
+  font-size: 13px;
+}
+
+.student-status-wrap {
+    position: relative;
+}
+
+.student-status-button {
+    position: relative;
+}
+
+.student-status-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #b9c2cf;
+    border: 1.5px solid white;
+}
+
+.student-status-button.connected {
+    color: #2e9d68;
+}
+
+.student-status-button.connected .student-status-dot {
+    background: #3fb97a;
+}
+
+.student-status-button.locked .student-status-dot {
+    background: #e6ad49;
+}
+
+.student-menu-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.student-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 41;
+    min-width: 190px;
+    padding: 6px;
+    background: white;
+    border: 1px solid #e3e8ef;
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(30, 45, 70, .16);
+    display: grid;
+    gap: 2px;
+}
+
+.student-menu-status {
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #7b8798;
+}
+
+.student-menu button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border: 0;
+    background: transparent;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #3d4a5c;
+    text-align: left;
+}
+
+.student-menu button:hover:not(:disabled) {
+    background: #f1f4f8;
+}
+
+.student-menu button.danger {
+    color: #d64545;
+}
+
+.student-menu button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
 }
