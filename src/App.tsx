@@ -31,6 +31,7 @@ type ItemGesture =
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 type DeleteConfirmation = { type: 'lesson'; lessonId: string } | { type: 'folder'; folder: string }
 
+const studentToolIds: Tool[] = ['select', 'pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -253,6 +254,9 @@ function App() {
     liveStateRef.current = { pageIndex, pages, items: currentItems, background }
     const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
     const liveSubscribedRef = useRef(false)
+    const studentEditPendingRef = useRef(false)
+    const openLessonIdRef = useRef<string | null>(null)
+    openLessonIdRef.current = openLesson?.id ?? null
     const broadcastLiveState = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
@@ -266,6 +270,13 @@ function App() {
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
         channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
+        // Student edits arrive for the page the student was viewing; apply them to that page.
+        channel.on('broadcast', { event: 'items' }, ({ payload }) => {
+            const edit = payload as { pageIndex: number; items: BoardItem[] }
+            const lessonId = openLessonIdRef.current
+            if (!lessonId || !edit || !Array.isArray(edit.items) || edit.pageIndex !== liveStateRef.current.pageIndex) return
+            setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${edit.pageIndex}`]: edit.items }))
+        })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
             if (status === 'SUBSCRIBED') broadcastLiveState()
@@ -282,12 +293,23 @@ function App() {
         return () => window.clearTimeout(timeout)
     }, [shareToken, studentView, pageIndex, pages, currentItems, background])
 
+    // Student: send local edits back to the teacher.
+    useEffect(() => {
+        if (!studentView || !studentEditPendingRef.current) return
+        studentEditPendingRef.current = false
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, items: currentItems } })
+    }, [studentView, currentItems, pageIndex])
+
     // Student: follow the teacher's page and show its live content.
     useEffect(() => {
         const client = supabase
         const token = new URLSearchParams(window.location.search).get('token')
         if (!client || !studentView || !token) return
         const channel = client.channel(`lesson-live:${token}`)
+        liveChannelRef.current = channel
+        liveSubscribedRef.current = false
         channel.on('broadcast', { event: 'state' }, ({ payload }) => {
             const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string }
             if (!live || !Array.isArray(live.pages) || !Array.isArray(live.items)) return
@@ -300,9 +322,14 @@ function App() {
             setSelectedItemId(null)
         })
         channel.subscribe((status) => {
+            liveSubscribedRef.current = status === 'SUBSCRIBED'
             if (status === 'SUBSCRIBED') void channel.send({ type: 'broadcast', event: 'hello', payload: {} })
         })
-        return () => { void client.removeChannel(channel) }
+        return () => {
+            liveSubscribedRef.current = false
+            liveChannelRef.current = null
+            void client.removeChannel(channel)
+        }
     }, [studentView])
     const [liveLessonPage, setLiveLessonPage] = useState<{ index: number; items: BoardItem[]; background: string } | null>(null)
     useEffect(() => {
@@ -489,6 +516,7 @@ function App() {
 
     function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
         const recordHistory = options?.recordHistory ?? true
+        if (studentView) studentEditPendingRef.current = true
         setItemsByPage((previous) => {
             const existing = previous[currentPageKey] ?? []
             const resolved = typeof nextItems === 'function' ? nextItems(existing) : nextItems
@@ -509,6 +537,7 @@ function App() {
         const previousState = entry.past[entry.past.length - 1]
         entry.past = entry.past.slice(0, -1)
         entry.future = [...entry.future, currentItems]
+        if (studentView) studentEditPendingRef.current = true
         setItemsByPage((previous) => ({ ...previous, [currentPageKey]: previousState }))
         setSelectedItemId(null)
         setHistoryTick((tick) => tick + 1)
@@ -520,6 +549,7 @@ function App() {
         const nextState = entry.future[entry.future.length - 1]
         entry.future = entry.future.slice(0, -1)
         entry.past = [...entry.past, currentItems]
+        if (studentView) studentEditPendingRef.current = true
         setItemsByPage((previous) => ({ ...previous, [currentPageKey]: nextState }))
         setSelectedItemId(null)
         setHistoryTick((tick) => tick + 1)
@@ -930,7 +960,7 @@ function App() {
     }
 
     function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: 'move' | 'resize' = 'move') {
-        if (studentView || activeTool !== 'select') return
+        if (activeTool !== 'select') return
         setSelectedItemId(item.id)
         event.stopPropagation()
         if (event.target instanceof HTMLInputElement) {
@@ -1059,7 +1089,7 @@ function App() {
     }
 
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
-        if (studentView || !stageRef.current) return
+        if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
         if (activeTool === 'text' || activeTool === 'postit') return
         if (activeTool === 'element-eraser') {
@@ -1202,7 +1232,7 @@ function App() {
     }
 
     function onStageClick(event: ReactMouseEvent<HTMLElement>) {
-        if (studentView || !stageRef.current) return
+        if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
         if (activeTool === 'postit') {
             setPostitDraft({ left: stageX / 10, top: stageY / 6.2, text: 'Remember this sound!' })
@@ -1282,7 +1312,7 @@ function App() {
     }
 
     function renderSelectedItemToolbar(): ReactNode {
-        if (studentView || !selectedItem) return null
+        if (!selectedItem) return null
         let colorControls: ReactNode = null
         if (selectedItem.type === 'text') colorControls = renderColorPicker('Text', selectedItem.color, setSelectedTextColor)
         else if (selectedItem.type === 'grid' && activeGridCell?.itemId === selectedItem.id) {
@@ -1306,7 +1336,7 @@ function App() {
     }
 
     function renderToolColorToolbar(): ReactNode {
-        if (studentView || selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text', 'grid'].includes(activeTool)) return null
+        if (selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text', 'grid'].includes(activeTool)) return null
         const toolLabel = activeTool === 'shape' ? 'New shape' : activeTool === 'text' ? 'New text' : activeTool === 'grid' ? 'New grid' : 'Ink'
         return <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}>
             <span>{toolLabel}</span>
@@ -1477,10 +1507,11 @@ function App() {
                 <div className="board-layout">
                     <aside className="tool-rail" aria-label="Whiteboard tools">
                         {!studentView && <><button className="rail-back" onClick={() => setOpenLesson(null)} title="Back to library"><ArrowLeft size={18} /></button>
-                            <div className="rail-divider" />
-                            {toolList.map(({ id: toolId, label, icon: Icon }) => <button key={toolId} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
-                            <div className="rail-spacer" />
-                            <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}
+                            <div className="rail-divider" /></>}
+                        {<>
+                            {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
+                            {!studentView && <><div className="rail-spacer" />
+                            <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}</>}
                     </aside>
                     <main className="board-main">
                         <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
@@ -1521,7 +1552,7 @@ function App() {
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (!studentView && activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
                                             className="board-text-input"
                                             autoFocus
                                             value={item.text}
