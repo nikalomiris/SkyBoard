@@ -1931,6 +1931,13 @@ kbd {
     pointer-events: all;
 }
 
+/* Only the select and text tools may interact with existing elements. */
+.page-paper:not([data-tool="select"]):not([data-tool="text"]) .drawing-layer .board-item,
+.page-paper:not([data-tool="select"]):not([data-tool="text"]) .drawing-layer .board-item * {
+    pointer-events: none !important;
+    user-select: none;
+}
+
 .selection-frame {
     pointer-events: none;
 }
