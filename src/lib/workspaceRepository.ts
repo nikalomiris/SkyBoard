@@ -382,15 +382,15 @@ export async function initializeWorkspace(folders: string[], lessons: Lesson[]) 
 }
 
 export type SharedLessonPage = { name: string; position: number; elements: BoardItem[]; background: string }
-export type SharedLessonData = { lesson: { id: string; title: string; color: string }; pages: SharedLessonPage[] }
-
-export async function createLessonShareLink(lessonId: string): Promise<{ token: string; expiresAt: string }> {
-    const result = await getClient().rpc('create_lesson_session', { p_lesson_id: lessonId })
-    if (result.error) throw new Error(result.error.message)
-    const row = (result.data as { token: string; expires_at: string }[] | null)?.[0]
-    if (!row) throw new Error('Supabase returned no data.')
-    return { token: row.token, expiresAt: row.expires_at }
+export type SharedInvite = { id: string; label: string; color: string }
+export type SharedLessonData = {
+    access: 'pending' | 'admitted' | 'removed'
+    sessionId: string
+    invite: SharedInvite
+    lesson?: { id: string; title: string; color: string }
+    pages?: SharedLessonPage[]
 }
+export type LessonInvite = SharedInvite & { token: string; status: 'pending' | 'admitted' | 'removed' }
 
 export async function getSharedLesson(token: string): Promise<SharedLessonData> {
     if (!supabase) throw new Error('Supabase is not configured.')
@@ -403,4 +403,40 @@ export async function getSharedLesson(token: string): Promise<SharedLessonData> 
 export async function endLessonShare(lessonId: string): Promise<void> {
     const result = await getClient().rpc('end_lesson_share', { p_lesson_id: lessonId })
     if (result.error) throw new Error(result.error.message)
+}
+
+export async function startLessonShare(lessonId: string): Promise<{ sessionId: string; expiresAt: string }> {
+    const result = await getClient().rpc('start_lesson_share', { p_lesson_id: lessonId })
+    if (result.error) throw new Error(result.error.message)
+    return result.data as { sessionId: string; expiresAt: string }
+}
+
+export async function getActiveLessonShare(lessonId: string): Promise<{ sessionId: string; expiresAt: string } | null> {
+    const result = await getClient().from('lesson_sessions').select('id,expires_at').eq('lesson_id', lessonId).eq('status', 'active').gt('expires_at', new Date().toISOString()).order('created_at', { ascending: false }).limit(1)
+    if (result.error) throw new Error(result.error.message)
+    const row = (result.data as { id: string; expires_at: string }[])[0]
+    return row ? { sessionId: row.id, expiresAt: row.expires_at } : null
+}
+
+export async function listLessonInvites(sessionId: string): Promise<LessonInvite[]> {
+    const result = await getClient().from('lesson_invites').select('id,label,color,token,status').eq('session_id', sessionId).order('created_at')
+    if (result.error) throw new Error(result.error.message)
+    return result.data as LessonInvite[]
+}
+
+export async function createLessonInvite(sessionId: string, label: string, requiresApproval: boolean): Promise<LessonInvite> {
+    const result = await getClient().rpc('create_lesson_invite', { p_session_id: sessionId, p_label: label, p_requires_approval: requiresApproval })
+    if (result.error) throw new Error(result.error.message)
+    return result.data as LessonInvite
+}
+
+export async function setLessonInviteStatus(inviteId: string, status: LessonInvite['status']): Promise<void> {
+    const result = await getClient().rpc('set_lesson_invite_status', { p_invite_id: inviteId, p_status: status })
+    if (result.error) throw new Error(result.error.message)
+}
+
+export async function listLiveLessonIds(): Promise<string[]> {
+    const result = await getClient().from('lesson_sessions').select('lesson_id').eq('status', 'active').gt('expires_at', new Date().toISOString())
+    if (result.error) throw new Error(result.error.message)
+    return [...new Set((result.data as { lesson_id: string }[]).map((row) => row.lesson_id))]
 }

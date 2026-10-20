@@ -15,7 +15,8 @@ import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { createLessonShareLink, endLessonShare, getSharedLesson, initializeWorkspace, loadWorkspace, saveWorkspace } from './lib/workspaceRepository'
+import { createLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
+import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
     folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
@@ -31,7 +32,7 @@ type ItemGesture =
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 type DeleteConfirmation = { type: 'lesson'; lessonId: string } | { type: 'folder'; folder: string }
 
-const studentToolIds: Tool[] = ['select', 'pen', 'brush', 'highlighter', 'eraser', 'text']
+const studentToolIds: Tool[] = ['pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -50,9 +51,15 @@ const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited'
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
-    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error' | 'removed'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
+    const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error' | 'removed' | 'waiting'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
     const [sharedLessonError, setSharedLessonError] = useState('')
-    const removedRef = useRef(false)
+    const studentAccessRef = useRef('')
+    const [teacherAway, setTeacherAway] = useState(false)
+    const teacherAwayTimerRef = useRef(0)
+    const [liveLessonIds, setLiveLessonIds] = useState<string[]>([])
+    const studentInviteRef = useRef<SharedInvite | null>(null)
+    const [studentSessionId, setStudentSessionId] = useState('')
+    const reloadSharedLessonRef = useRef<() => void>(() => undefined)
     const [removedReason, setRemovedReason] = useState<'removed' | 'ended'>('removed')
     const [authSession, setAuthSession] = useState<Session | null>(null)
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
@@ -86,7 +93,7 @@ function App() {
         return active && active.lessonId === openLesson?.id ? Math.min(active.pageIndex, Math.max(0, pages.length - 1)) : 0
     })
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
-    const [activeTool, setActiveTool] = useState<Tool>('select')
+    const [activeTool, setActiveTool] = useState<Tool>(() => new URLSearchParams(window.location.search).get('view') === 'student' ? 'pen' : 'select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
@@ -108,7 +115,17 @@ function App() {
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
-    const [shareToken, setShareToken] = useState('')
+    const [shareSessionId, setShareSessionId] = useState('')
+    const [shareExpiresAt, setShareExpiresAt] = useState('')
+    const [invites, setInvites] = useState<LessonInvite[]>([])
+    const [onlineInviteIds, setOnlineInviteIds] = useState<string[]>([])
+    const [lockedInviteIds, setLockedInviteIds] = useState<string[]>([])
+    const [requireApproval, setRequireApproval] = useState(true)
+    const [newInviteName, setNewInviteName] = useState('')
+    const [copiedInviteId, setCopiedInviteId] = useState('')
+    const [studentCursors, setStudentCursors] = useState<Record<string, { x: number; y: number; name: string; color: string; pageIndex: number }>>({})
+    const cursorTimersRef = useRef<Record<string, number>>({})
+    const lastCursorSentRef = useRef(0)
     const liveReceivedRef = useRef(false)
     const [shareLinkError, setShareLinkError] = useState('')
     const [showNewLesson, setShowNewLesson] = useState(false)
@@ -139,9 +156,11 @@ function App() {
     const [imageSearching, setImageSearching] = useState(false)
     const [imageSearchError, setImageSearchError] = useState('')
     const [showFileMenu, setShowFileMenu] = useState<string | null>(null)
-    const [studentCount, setStudentCount] = useState(0)
     const [studentLocked, setStudentLocked] = useState(false)
     const [showStudentMenu, setShowStudentMenu] = useState(false)
+    const connectedInvites = invites.filter((invite) => invite.status === 'admitted' && onlineInviteIds.includes(invite.id))
+    const waitingInvites = invites.filter((invite) => invite.status === 'pending' && onlineInviteIds.includes(invite.id))
+    const studentCount = connectedInvites.length
     const isFollowing = studentCount > 0
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null)
@@ -230,12 +249,21 @@ function App() {
             setSharedLessonStatus('error')
             return
         }
-        void getSharedLesson(token).then((shared) => {
+        const load = () => void getSharedLesson(token).then((shared) => {
             if (!active) return
-            if (removedRef.current) return
+            studentInviteRef.current = shared.invite
+            studentAccessRef.current = shared.access
+            setStudentSessionId(shared.sessionId)
+            if (shared.access === 'pending') return setSharedLessonStatus('waiting')
+            if (shared.access === 'removed' || !shared.lesson || !shared.pages) {
+                setRemovedReason('removed')
+                return setSharedLessonStatus('removed')
+            }
+            setInk(shared.invite.color)
             const pageNames = shared.pages.length ? shared.pages.map((page) => page.name) : ['Page 1']
             const liveStarted = liveReceivedRef.current
-            setOpenLesson((previous) => ({ id: shared.lesson.id, title: shared.lesson.title, folder: '', pages: liveStarted && previous ? previous.pages : pageNames, updated: '', color: shared.lesson.color, kind: 'lesson' }))
+            const lesson = shared.lesson
+            setOpenLesson((previous) => ({ id: lesson.id, title: lesson.title, folder: '', pages: liveStarted && previous ? previous.pages : pageNames, updated: '', color: lesson.color, kind: 'lesson' }))
             if (!liveStarted) {
                 setPages(pageNames)
                 setPageIndex(0)
@@ -243,8 +271,8 @@ function App() {
             const sharedItems: PageItems = {}
             const sharedBackgrounds: Record<string, string> = {}
             for (const page of shared.pages) {
-                sharedItems[`${shared.lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
-                sharedBackgrounds[`${shared.lesson.id}:${page.position}`] = page.background
+                sharedItems[`${lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
+                sharedBackgrounds[`${lesson.id}:${page.position}`] = page.background
             }
             setItemsByPage((previous) => ({ ...sharedItems, ...previous }))
             setBackgroundsByPage((previous) => ({ ...sharedBackgrounds, ...previous }))
@@ -252,7 +280,7 @@ function App() {
         }).catch((error: unknown) => {
             if (!active) return
             if (error instanceof Error && error.message.includes('LESSON_ENDED')) {
-                removedRef.current = true
+                studentAccessRef.current = 'ended'
                 setRemovedReason('ended')
                 setSharedLessonStatus('removed')
                 return
@@ -260,6 +288,8 @@ function App() {
             setSharedLessonError(error instanceof Error ? error.message : 'Unable to load this student link.')
             setSharedLessonStatus('error')
         })
+        reloadSharedLessonRef.current = load
+        load()
         return () => { active = false }
     }, [studentView])
 
@@ -292,10 +322,12 @@ function App() {
     blendStateRef.current = { open: showBlend, tiles: blendTiles, color: blendColor }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
+    const lockedInviteIdsRef = useRef(lockedInviteIds)
+    lockedInviteIdsRef.current = lockedInviteIds
     const broadcastLock = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
-        void channel.send({ type: 'broadcast', event: 'lock', payload: { locked: studentLockedRef.current } })
+        void channel.send({ type: 'broadcast', event: 'lock', payload: { all: studentLockedRef.current, ids: lockedInviteIdsRef.current } })
     }
     const broadcastBlendState = () => {
         const channel = liveChannelRef.current
@@ -312,16 +344,26 @@ function App() {
 
     // Teacher: publish the current page (and its content) to every student on the shared link.
     useEffect(() => {
-        if (!supabase || studentView || !shareToken) return
-        const channel = supabase.channel(`lesson-live:${shareToken}`)
+        if (!supabase || studentView || !shareSessionId) return
+        const channel = supabase.channel(`lesson-live:${shareSessionId}`)
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
         channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
         channel.on('presence', { event: 'sync' }, () => {
-            const members = Object.values(channel.presenceState()).flat() as unknown as { role?: string }[]
-            setStudentCount(members.filter((member) => member.role === 'student').length)
+            const members = Object.values(channel.presenceState()).flat() as unknown as { role?: string; inviteId?: string }[]
+            setOnlineInviteIds([...new Set(members.filter((member) => member.role === 'student' && member.inviteId).map((member) => member.inviteId as string))])
         })
         channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
+        channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
+            const cursor = payload as { inviteId: string; x: number; y: number; name: string; color: string; pageIndex: number }
+            if (!cursor?.inviteId) return
+            setStudentCursors((previous) => ({ ...previous, [cursor.inviteId]: cursor }))
+            window.clearTimeout(cursorTimersRef.current[cursor.inviteId])
+            cursorTimersRef.current[cursor.inviteId] = window.setTimeout(() => setStudentCursors((previous) => {
+                const { [cursor.inviteId]: _gone, ...rest } = previous
+                return rest
+            }), 2500)
+        })
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
             const edit = payload as { pageIndex: number; items: BoardItem[] }
@@ -332,35 +374,39 @@ function App() {
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
-            if (status === 'SUBSCRIBED') broadcastLiveState()
+            if (status === 'SUBSCRIBED') {
+                void channel.track({ role: 'teacher' })
+                broadcastLiveState()
+            }
         })
         return () => {
             liveSubscribedRef.current = false
             liveChannelRef.current = null
-            setStudentCount(0)
+            setOnlineInviteIds([])
+            setStudentCursors({})
             void supabase?.removeChannel(channel)
         }
-    }, [shareToken, studentView])
+    }, [shareSessionId, studentView])
     useEffect(() => {
-        if (!shareToken || studentView) return
+        if (!shareSessionId || studentView) return
         const timeout = window.setTimeout(broadcastLiveState, 120)
         return () => window.clearTimeout(timeout)
-    }, [shareToken, studentView, pageIndex, pages, currentItems, background])
+    }, [shareSessionId, studentView, pageIndex, pages, currentItems, background])
 
     useEffect(() => {
-        if (!shareToken || studentView) return
+        if (!shareSessionId || studentView) return
         broadcastLock()
-    }, [shareToken, studentView, studentLocked])
+    }, [shareSessionId, studentView, studentLocked, lockedInviteIds])
     useEffect(() => {
-        if (!shareToken || studentView) return
+        if (!shareSessionId || studentView) return
         broadcastBlendState()
-    }, [shareToken, studentView, showBlend, blendTiles, blendColor])
+    }, [shareSessionId, studentView, showBlend, blendTiles, blendColor])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
     const draftActive = Boolean(currentPoints) && (activeTool === 'laser' || (drawing && ['pen', 'brush', 'highlighter', 'eraser'].includes(activeTool)))
     useEffect(() => {
-        if (!shareToken && !studentView) return
+        if (!shareSessionId && !studentView) return
         const send = (payload: LiveDraft | null) => {
             const channel = liveChannelRef.current
             if (channel && liveSubscribedRef.current) void channel.send({ type: 'broadcast', event: 'draft', payload })
@@ -376,7 +422,7 @@ function App() {
             send({ kind: activeTool === 'eraser' ? 'eraser' : activeTool === 'laser' ? 'laser' : 'ink', pageIndex, points: currentPoints, color: ink, ...style })
         }, delay)
         return () => window.clearTimeout(timeout)
-    }, [draftActive, currentPoints, shareToken, studentView])
+    }, [draftActive, currentPoints, shareSessionId, studentView])
 
     // Student: send local edits back to the teacher.
     useEffect(() => {
@@ -390,13 +436,22 @@ function App() {
     // Student: follow the teacher's page and show its live content.
     useEffect(() => {
         const client = supabase
-        const token = new URLSearchParams(window.location.search).get('token')
-        if (!client || !studentView || !token) return
-        const channel = client.channel(`lesson-live:${token}`)
+        if (!client || !studentView || !studentSessionId) return
+        const channel = client.channel(`lesson-live:${studentSessionId}`)
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
-        channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
+        const admitted = () => studentAccessRef.current === 'admitted'
+        const forMe = (ids?: string[] | null) => !ids || ids.includes(studentInviteRef.current?.id ?? '')
+        // A short grace period avoids flashing the away screen while the teacher's presence is still arriving.
+        channel.on('presence', { event: 'sync' }, () => {
+            const members = Object.values(channel.presenceState()).flat() as unknown as { role?: string }[]
+            window.clearTimeout(teacherAwayTimerRef.current)
+            if (members.some((member) => member.role === 'teacher')) setTeacherAway(false)
+            else teacherAwayTimerRef.current = window.setTimeout(() => setTeacherAway(true), 3000)
+        })
+        channel.on('broadcast', { event: 'draft' }, ({ payload }) => { if (admitted()) handleRemoteDraft({ payload }) })
         channel.on('broadcast', { event: 'state' }, ({ payload }) => {
+            if (!admitted()) return
             const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string }
             if (!live || !Array.isArray(live.pages) || !Array.isArray(live.items)) return
             liveReceivedRef.current = true
@@ -409,15 +464,21 @@ function App() {
             setSelectedItemId(null)
         })
         channel.on('broadcast', { event: 'kick' }, ({ payload }) => {
-            setRemovedReason((payload as { reason?: string })?.reason === 'ended' ? 'ended' : 'removed')
-            liveSubscribedRef.current = false
-            liveChannelRef.current = null
-            void client.removeChannel(channel)
-            removedRef.current = true
+            const kick = payload as { ids?: string[] | null; reason?: string }
+            if (!forMe(kick?.ids)) return
+            studentAccessRef.current = kick?.reason === 'ended' ? 'ended' : 'removed'
+            setRemovedReason(kick?.reason === 'ended' ? 'ended' : 'removed')
             setSharedLessonStatus('removed')
         })
-        channel.on('broadcast', { event: 'lock' }, ({ payload }) => setStudentLocked(Boolean((payload as { locked?: boolean })?.locked)))
+        channel.on('broadcast', { event: 'admit' }, ({ payload }) => {
+            if ((payload as { inviteId?: string })?.inviteId === studentInviteRef.current?.id && studentAccessRef.current !== 'ended') reloadSharedLessonRef.current()
+        })
+        channel.on('broadcast', { event: 'lock' }, ({ payload }) => {
+            const lock = payload as { all?: boolean; ids?: string[] }
+            setStudentLocked(Boolean(lock?.all) || (lock?.ids ?? []).includes(studentInviteRef.current?.id ?? ''))
+        })
         channel.on('broadcast', { event: 'blend' }, ({ payload }) => {
+            if (!admitted()) return
             const blend = payload as { open: boolean; tiles: BlendTile[]; color: string | null }
             if (!blend || !Array.isArray(blend.tiles)) return
             setBlendTiles(blend.tiles)
@@ -426,15 +487,18 @@ function App() {
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
-            if (status === 'SUBSCRIBED') void channel.track({ role: 'student' })
-            if (status === 'SUBSCRIBED') void channel.send({ type: 'broadcast', event: 'hello', payload: {} })
+            if (status !== 'SUBSCRIBED') return
+            const invite = studentInviteRef.current
+            void channel.track({ role: 'student', inviteId: invite?.id, name: invite?.label, color: invite?.color })
+            void channel.send({ type: 'broadcast', event: 'hello', payload: {} })
         })
         return () => {
+            window.clearTimeout(teacherAwayTimerRef.current)
             liveSubscribedRef.current = false
             liveChannelRef.current = null
             void client.removeChannel(channel)
         }
-    }, [studentView])
+    }, [studentView, studentSessionId])
     const [liveLessonPage, setLiveLessonPage] = useState<{ index: number; items: BoardItem[]; background: string } | null>(null)
     useEffect(() => {
         if (!liveLessonPage || !openLesson) return
@@ -805,18 +869,66 @@ function App() {
         setRenamingTitle(true)
     }
 
-    async function removeStudent(reason: 'removed' | 'ended' = 'removed') {
+    const inviteLink = (invite: LessonInvite) => `${window.location.origin}${window.location.pathname}?view=student&token=${invite.token}`
+
+    function sendLive(event: string, payload: unknown) {
         const channel = liveChannelRef.current
-        const lessonId = openLesson?.id
-        if (!channel || !lessonId || !window.confirm(reason === 'ended' ? 'End the lesson? Everyone will be disconnected and the current student link will stop working.' : `Remove ${studentCount === 1 ? 'the student' : 'all students'}? They will lose access and the current student link will stop working.`)) return
+        if (channel && liveSubscribedRef.current) void channel.send({ type: 'broadcast', event, payload })
+    }
+
+    async function setInviteState(invite: LessonInvite, status: LessonInvite['status']) {
         try {
-            await channel.send({ type: 'broadcast', event: 'kick', payload: { reason } })
-            if (isSupabaseConfigured) await endLessonShare(lessonId)
+            await setLessonInviteStatus(invite.id, status)
+        } catch (error) {
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to update this student.')
+            return
+        }
+        setInvites((previous) => previous.map((item) => item.id === invite.id ? { ...item, status } : item))
+        if (status === 'admitted') sendLive('admit', { inviteId: invite.id })
+        else if (status === 'removed') {
+            setLockedInviteIds((previous) => previous.filter((id) => id !== invite.id))
+            sendLive('kick', { ids: [invite.id], reason: 'removed' })
+        }
+    }
+
+    async function removeAllStudents() {
+        const targets = invites.filter((invite) => invite.status === 'admitted')
+        if (!targets.length || !window.confirm(`Remove ${targets.length === 1 ? 'the student' : 'all students'}? They will lose access until you let them back in.`)) return
+        await Promise.all(targets.map((invite) => setInviteState(invite, 'removed')))
+    }
+
+    async function endLesson() {
+        if (!shareSessionId || !openLesson || !window.confirm('End the lesson? Everyone will be disconnected and all student links will stop working.')) return
+        sendLive('kick', { ids: null, reason: 'ended' })
+        try {
+            await endLessonShare(openLesson.id)
         } catch (error) {
             console.error(error)
         }
-        setShareToken('')
-        setShareLinkUrl('')
+        setShareSessionId('')
+        setInvites([])
+        setLockedInviteIds([])
+        setStudentLocked(false)
+        setLiveLessonIds((previous) => previous.filter((lessonId) => lessonId !== openLesson.id))
+        setShowShare(false)
+    }
+
+    async function addInvite() {
+        if (!shareSessionId) return
+        try {
+            const invite = await createLessonInvite(shareSessionId, newInviteName, requireApproval)
+            setInvites((previous) => [...previous, invite])
+            setNewInviteName('')
+            setShareLinkError('')
+        } catch (error) {
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to create a student link.')
+        }
+    }
+
+    function copyInviteLink(invite: LessonInvite) {
+        void navigator.clipboard?.writeText(inviteLink(invite))
+        setCopiedInviteId(invite.id)
+        window.setTimeout(() => setCopiedInviteId((current) => current === invite.id ? '' : current), 1800)
     }
 
     function openShareDialog() {
@@ -827,15 +939,41 @@ function App() {
             setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`)
             return
         }
-        setShareLinkUrl('')
+        if (shareSessionId) return
         setShareLinkLoading(true)
-        void createLessonShareLink(openLesson.id).then(({ token }) => {
-            setShareToken(token)
-            setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&token=${token}`)
+        void startLessonShare(openLesson.id).then(async (share) => {
+            setShareSessionId(share.sessionId)
+            setShareExpiresAt(share.expiresAt)
+            setInvites(await listLessonInvites(share.sessionId))
         }).catch((error: unknown) => {
-            setShareLinkError(error instanceof Error ? error.message : 'Unable to create a student link.')
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to start sharing this lesson.')
         }).finally(() => setShareLinkLoading(false))
     }
+
+    useEffect(() => {
+        if (!supabase || studentView || !authSession || !workspaceReady || openLesson) return
+        let active = true
+        void listLiveLessonIds().then((ids) => { if (active) setLiveLessonIds(ids) }).catch(() => undefined)
+        return () => { active = false }
+    }, [openLesson, authSession?.user.id, studentView, workspaceReady])
+
+    // Teacher: pick an already-live room back up after a reload or when returning to the lesson.
+    useEffect(() => {
+        setShareSessionId('')
+        setInvites([])
+        setLockedInviteIds([])
+        if (!supabase || studentView || !authSession || !openLesson?.id) return
+        let active = true
+        void getActiveLessonShare(openLesson.id).then(async (share) => {
+            if (!active || !share) return
+            const existing = await listLessonInvites(share.sessionId)
+            if (!active) return
+            setShareSessionId(share.sessionId)
+            setShareExpiresAt(share.expiresAt)
+            setInvites(existing)
+        }).catch(() => undefined)
+        return () => { active = false }
+    }, [openLesson?.id, authSession?.user.id, studentView])
 
     function commitOpenLessonTitleRename() {
         setRenamingTitle(false)
@@ -1243,6 +1381,13 @@ function App() {
 
     function onStageMove(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
+        if (studentView && studentInviteRef.current && Date.now() - lastCursorSentRef.current > 50) {
+            const rect = stageRef.current.getBoundingClientRect()
+            if (rect.width && rect.height) {
+                lastCursorSentRef.current = Date.now()
+                sendLive('cursor', { inviteId: studentInviteRef.current.id, name: studentInviteRef.current.label, color: studentInviteRef.current.color, x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height, pageIndex })
+            }
+        }
         const { stageX, stageY } = coordinates(event)
         if (lineDraft) {
             setLineDraft({ ...lineDraft, end: [stageX, stageY] })
@@ -1493,7 +1638,9 @@ function App() {
     }
     if (isSupabaseConfigured && studentView) {
         if (sharedLessonStatus === 'loading') return <AuthScreen loading loadingTitle="Loading your lesson" loadingMessage="Fetching this lesson from your teacher's link." />
-        if (sharedLessonStatus === 'removed') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>{removedReason === 'ended' ? 'This lesson has ended' : 'You’ve been removed from this lesson'}</h1><p className="auth-intro">{removedReason === 'ended' ? 'Your teacher has ended the lesson. Thanks for joining! Ask them for a new link to join another session.' : 'Your teacher ended your access. If you think this is a mistake, please ask them for a new link.'}</p></section></main>
+        if (sharedLessonStatus === 'ready' && teacherAway) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>Your teacher stepped away</h1><p className="auth-intro">The lesson is still open, but your teacher has left the room for a moment, so the board is paused. Keep this page open — the lesson will continue on its own as soon as they’re back.</p></section></main>
+        if (sharedLessonStatus === 'waiting') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>Waiting for your teacher</h1><p className="auth-intro">Hang tight — your teacher will let you in shortly. This page will open the lesson automatically.</p><button className="auth-submit" onClick={() => reloadSharedLessonRef.current()}>Check again</button></section></main>
+        if (sharedLessonStatus === 'removed') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>{removedReason === 'ended' ? 'This lesson has ended' : 'You’ve been removed from this lesson'}</h1><p className="auth-intro">{removedReason === 'ended' ? 'Your teacher has ended the lesson. Thanks for joining! Ask them for a new link to join another session.' : 'Your teacher ended your access. If this was a mistake, ask them to let you back in — this page will reopen automatically.'}</p>{removedReason === 'removed' && <button className="auth-submit" onClick={() => reloadSharedLessonRef.current()}>Check again</button>}</section></main>
         if (sharedLessonStatus === 'error') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">{sharedLessonError}</p></section></main>
         if (!openLesson) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">We couldn’t find a lesson for this link.</p></section></main>
     }
@@ -1505,7 +1652,11 @@ function App() {
                 <div className="topbar-center"><span className={`workspace-dot ${authSession && !studentView ? cloudSaveStatus : 'saved'}`} role="status" title={authSession && !studentView ? (cloudSaveStatus === 'saving' ? 'Saving…' : cloudSaveStatus === 'error' ? `Not saved: ${cloudSaveError}` : 'All changes saved') : 'All changes saved'} aria-label="Save status" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : <span className="crumb-current">My workspace</span>}</div>
                 <div className="topbar-actions">
                     {openLesson ? <>
-                        {!studentView && <div className="student-status-wrap"><button className={`icon-button student-status-button ${isFollowing ? 'connected' : ''} ${isFollowing && studentLocked ? 'locked' : ''}`} aria-haspopup="menu" aria-expanded={showStudentMenu} aria-label={isFollowing ? 'Student connected' : 'No student connected'} title={isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => setShowStudentMenu((open) => !open)}><Users size={17} /><span className="student-status-dot" /></button>{showStudentMenu && <><div className="student-menu-scrim" onClick={() => setShowStudentMenu(false)} /><div className="student-menu" role="menu"><div className="student-menu-status">{isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'}</div><button role="menuitem" onClick={() => { setStudentLocked(!studentLocked); setShowStudentMenu(false) }}>{studentLocked ? <Unlock size={15} /> : <Lock size={15} />}{studentCount > 1 ? (studentLocked ? 'Unlock students' : 'Lock students') : (studentLocked ? 'Unlock student' : 'Lock student')}</button><button role="menuitem" className="danger" disabled={!isFollowing} onClick={() => { setShowStudentMenu(false); void removeStudent() }}><UserX size={15} />{studentCount > 1 ? 'Remove students' : 'Remove student'}</button><button role="menuitem" className="danger" disabled={!shareToken} onClick={() => { setShowStudentMenu(false); void removeStudent('ended') }}><LogOut size={15} />End lesson</button></div></>}</div>}
+                        {!studentView && <div className="student-status-wrap"><button className={`icon-button student-status-button ${isFollowing ? 'connected' : ''} ${isFollowing && (studentLocked || lockedInviteIds.length > 0) ? 'locked' : ''} ${waitingInvites.length ? 'waiting' : ''}`} aria-haspopup="menu" aria-expanded={showStudentMenu} aria-label={isFollowing ? 'Student connected' : 'No student connected'} title={waitingInvites.length ? `${waitingInvites.length} waiting to join` : isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => setShowStudentMenu((open) => !open)}><Users size={17} /><span className="student-status-dot" /></button>{showStudentMenu && <><div className="student-menu-scrim" onClick={() => setShowStudentMenu(false)} /><div className="student-menu" role="menu"><div className="student-menu-status">{!shareSessionId && isSupabaseConfigured ? 'Lesson not shared yet' : isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'}</div>
+                            {waitingInvites.length > 0 && <div className="student-menu-section"><div className="student-menu-label">Waiting to join</div>{waitingInvites.map((invite) => <div className="student-menu-row" key={invite.id}><span className="invite-dot" style={{ background: invite.color }} /><span className="student-menu-name">{invite.label}</span><button className="mini primary" onClick={() => void setInviteState(invite, 'admitted')}>Admit</button><button className="mini" onClick={() => void setInviteState(invite, 'removed')}>Decline</button></div>)}</div>}
+                            {connectedInvites.length > 0 && <div className="student-menu-section">{connectedInvites.map((invite) => { const locked = studentLocked || lockedInviteIds.includes(invite.id); return <div className="student-menu-row" key={invite.id}><span className="invite-dot" style={{ background: invite.color }} /><span className="student-menu-name">{invite.label}</span><button className="mini icon" disabled={studentLocked} aria-label={locked ? `Unlock ${invite.label}` : `Lock ${invite.label}`} title={locked ? 'Unlock' : 'Lock'} onClick={() => setLockedInviteIds((previous) => previous.includes(invite.id) ? previous.filter((id) => id !== invite.id) : [...previous, invite.id])}>{locked ? <Lock size={14} /> : <Unlock size={14} />}</button><button className="mini icon danger" aria-label={`Remove ${invite.label}`} title="Remove" onClick={() => void setInviteState(invite, 'removed')}><UserX size={14} /></button></div> })}</div>}
+                            <button role="menuitem" onClick={() => { setShowStudentMenu(false); openShareDialog() }}><Share2 size={15} />Students &amp; links…</button>
+                            <button role="menuitem" disabled={!isFollowing} onClick={() => setStudentLocked(!studentLocked)}>{studentLocked ? <Unlock size={15} /> : <Lock size={15} />}{studentCount > 1 ? (studentLocked ? 'Unlock students' : 'Lock students') : (studentLocked ? 'Unlock student' : 'Lock student')}</button><button role="menuitem" className="danger" disabled={!isFollowing} onClick={() => { setShowStudentMenu(false); void removeAllStudents() }}><UserX size={15} />{studentCount > 1 ? 'Remove students' : 'Remove student'}</button><button role="menuitem" className="danger" disabled={!shareSessionId} onClick={() => { setShowStudentMenu(false); void endLesson() }}><LogOut size={15} />End lesson</button></div></>}</div>}
                         {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
                         {!studentView && <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>}
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
@@ -1537,6 +1688,7 @@ function App() {
                         <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> New folder</button></div>
                         <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search lessons or students" aria-label="Search lessons or students" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><div className="sort-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSortMenuOpen(false) }}><button className="sort-button" aria-haspopup="listbox" aria-expanded={sortMenuOpen} onClick={() => setSortMenuOpen((open) => !open)}><span>{sortLabels[sortKey]}</span><ChevronDown size={15} /></button>{sortMenuOpen && <div className="sort-menu" role="listbox" aria-label="Sort lessons">{(Object.keys(sortLabels) as LessonSortKey[]).map((key) => <button key={key} role="option" aria-selected={sortKey === key} className={sortKey === key ? 'selected' : ''} onClick={() => { setSortKey(key); setSortMenuOpen(false) }}><span>{sortLabels[key]}</span>{sortKey === key && <Check size={14} />}</button>)}</div>}</div></div></div>
                         <div className="library-scroll">
+                        {liveLessonIds.length > 0 && !isMockWorkspace && <section className="live-section" aria-label="Live lessons"><div className="subfolder-section-heading"><span className="live-heading"><span className="live-pulse" />Live now</span><span>{liveLessonIds.length}</span></div><div className="live-grid">{lessons.filter((lesson) => liveLessonIds.includes(lesson.id)).map((lesson) => <button type="button" className="live-card" key={lesson.id} onClick={() => openBoard(lesson)}><span className="live-badge"><span className="live-pulse" />LIVE</span><span className="live-card-copy"><strong>{lesson.title}</strong><span>{lesson.folder.split(folderSeparator, 1)[0]}</span></span><span className="live-card-action">Rejoin <ChevronRight size={15} /></span></button>)}</div></section>}
                         {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
                             <div className="subfolder-section-heading"><span>Subfolders</span><span>{visibleSubfolders.length}</span></div>
                             <div className="subfolder-grid">
@@ -1687,7 +1839,7 @@ function App() {
                                             return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
                                         })()}
                                         {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
-                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
+                                                                                {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
                                             const remotePoints = parsePoints(remoteDraft.points)
                                             const [lastX, lastY] = remotePoints[remotePoints.length - 1]
                                             return remoteDraft.kind === 'eraser'
@@ -1696,6 +1848,7 @@ function App() {
                                         })()}
                                         {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind === 'ink' && <polyline points={remoteDraft.points} fill="none" stroke={remoteDraft.color} strokeWidth={remoteDraft.width} strokeOpacity={remoteDraft.opacity} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
                                     </svg>
+                                    {!studentView && Object.entries(studentCursors).filter(([, cursor]) => cursor.pageIndex === pageIndex).map(([inviteId, cursor]) => <div key={inviteId} className="live-student-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, color: cursor.color }}><MousePointer2 size={18} fill="currentColor" /><span>{cursor.name}</span></div>)}
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
@@ -1845,7 +1998,18 @@ function App() {
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
-            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your student in</h2><p>Share a live lesson link. Your student will follow the page you’re teaching on.</p>{shareLinkLoading ? <p className="share-link-status">Creating a secure link…</p> : shareLinkError ? <p className="share-link-status error">{shareLinkError}</p> : <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); setShowShare(false) }}><Copy size={15} /> Copy</button></div>}<div className="share-permission"><Check size={14} /> Student view is read-only{isSupabaseConfigured && ' · link expires in 7 days'}</div></div></div>}
+            {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal invite-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your students in</h2><p>Give each student a personal link. They follow the page you’re teaching on.</p>
+                {!isSupabaseConfigured ? <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); setShowShare(false) }}><Copy size={15} /> Copy</button></div> : shareLinkLoading ? <p className="share-link-status">Starting your lesson room…</p> : <>
+                    {shareLinkError && <p className="share-link-status error">{shareLinkError}</p>}
+                    {shareSessionId && <>
+                        <div className="share-live-status"><span className="live-dot" />Lesson room is live{shareExpiresAt ? ` · links expire ${new Date(shareExpiresAt).toLocaleDateString()}` : ''}</div>
+                        <form className="invite-form" onSubmit={(event) => { event.preventDefault(); void addInvite() }}><input value={newInviteName} onChange={(event) => setNewInviteName(event.target.value)} placeholder="Student name, e.g. Maya" aria-label="Student name" maxLength={40} /><button type="submit"><Plus size={15} /> Add</button></form>
+                        <label className="invite-approval"><input type="checkbox" checked={requireApproval} onChange={(event) => setRequireApproval(event.target.checked)} /> Ask me before a new student joins</label>
+                        <div className="invite-list">{invites.length === 0 ? <p className="share-link-status">Add a student to get their personal link.</p> : invites.map((invite) => { const online = onlineInviteIds.includes(invite.id); const state = invite.status === 'removed' ? 'Removed' : invite.status === 'pending' ? (online ? 'Waiting to join' : 'Not joined yet') : online ? 'Connected' : 'Offline'; return <div className={`invite-row ${invite.status}`} key={invite.id}><span className="invite-dot" style={{ background: invite.color }} /><div className="invite-info"><strong>{invite.label}</strong><small className={online && invite.status !== 'removed' ? 'online' : ''}>{state}</small></div><button className="invite-copy" onClick={() => copyInviteLink(invite)}>{copiedInviteId === invite.id ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>{invite.status === 'pending' && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Admit</button>}{invite.status === 'admitted' && <button className="invite-action danger" onClick={() => void setInviteState(invite, 'removed')}>Remove</button>}{invite.status === 'removed' && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Let back in</button>}</div> })}</div>
+                        <button className="end-lesson-button" onClick={() => void endLesson()}><LogOut size={15} /> End lesson for everyone</button>
+                    </>}
+                </>}
+            </div></div>}
             {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search the web for pictures and click one to add it to your page.</p><form className="image-search-form" onSubmit={async (event) => { event.preventDefault(); const q = imageQuery.trim(); if (!q) return; setImageSearching(true); setImageSearchError(''); try { const response = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(`${q} filetype:bitmap`)}&gsrlimit=30&prop=imageinfo&iiprop=url|mime&iiurlwidth=240&format=json&origin=*`); if (!response.ok) throw new Error('search failed'); const data = await response.json(); const pages = Object.values(data.query?.pages ?? {}) as { pageid: number; index?: number; title: string; imageinfo?: { thumburl?: string; url: string; mime?: string }[] }[]; const results = pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0)).filter((page) => page.imageinfo?.[0] && /^image\/(jpeg|png|webp|gif)$/.test(page.imageinfo[0].mime ?? '')).map((page) => ({ id: String(page.pageid), thumb: page.imageinfo![0].thumburl || page.imageinfo![0].url, src: page.imageinfo![0].url, title: page.title.replace(/^File:/, '').replace(/\.[^.]+$/, '') })); setImageResults(results); if (!results.length) setImageSearchError('No pictures found. Try another word.') } catch { setImageResults([]); setImageSearchError('Could not search right now. Check your connection or paste an image address below.') } finally { setImageSearching(false) } }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" autoFocus /><button type="submit" disabled={imageSearching}><Search size={15} /> {imageSearching ? 'Searching' : 'Search'}</button></form>{imageSearchError && <p className="image-search-error">{imageSearchError}</p>}{imageResults.length > 0 && <div className="image-results">{imageResults.map((result) => <button type="button" key={result.id} className="image-result" title={result.title} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: result.src, label: result.title }); setShowImageSearch(false) }}><img src={result.thumb} alt={result.title} loading="lazy" /></button>)}</div>}<label className="image-url-label">OR PASTE AN IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
         </div>
     )

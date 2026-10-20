@@ -4679,3 +4679,311 @@ kbd {
     opacity: .4;
     cursor: not-allowed;
 }
+
+.student-status-button.waiting .student-status-dot {
+    background: #e6ad49;
+    animation: pulse-dot 1s ease-in-out infinite;
+}
+
+.student-menu {
+    min-width: 260px;
+}
+
+.student-menu-section {
+    display: grid;
+    gap: 2px;
+    padding: 2px 0 6px;
+    border-bottom: 1px solid #eef1f5;
+}
+
+.student-menu-label {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #a0a9b8;
+}
+
+.student-menu-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+}
+
+.student-menu-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+    color: #3d4a5c;
+}
+
+.student-menu .mini {
+    padding: 4px 8px;
+    font-size: 12px;
+    border: 1px solid #e3e8ef;
+    background: white;
+}
+
+.student-menu .mini.primary {
+    background: #2e9d68;
+    border-color: #2e9d68;
+    color: white;
+}
+
+.student-menu .mini.primary:hover:not(:disabled) {
+    background: #278a5b;
+}
+
+.student-menu .mini.icon {
+    padding: 4px;
+    border-color: transparent;
+}
+
+.invite-dot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.invite-modal {
+    width: min(480px, 100%);
+}
+
+.share-live-status {
+    margin-top: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2e9d68;
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #3fb97a;
+}
+
+.invite-form {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.invite-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid #dfe5ec;
+    border-radius: 6px;
+    font: 13px var(--font-ui);
+}
+
+.invite-form button,
+.end-lesson-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent);
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.invite-approval {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #5c6878;
+}
+
+.invite-list {
+    margin-top: 14px;
+    max-height: 260px;
+    overflow-y: auto;
+    display: grid;
+    gap: 6px;
+}
+
+.invite-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid #e8ecf1;
+    border-radius: 8px;
+}
+
+.invite-row.removed {
+    opacity: .65;
+}
+
+.invite-info {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+}
+
+.invite-info strong {
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.invite-info small {
+    font-size: 11px;
+    color: #8a94a3;
+}
+
+.invite-info small.online {
+    color: #2e9d68;
+    font-weight: 700;
+}
+
+.invite-copy,
+.invite-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 9px;
+    border: 1px solid #dfe5ec;
+    border-radius: 6px;
+    background: white;
+    font-size: 12px;
+    font-weight: 600;
+    color: #3d4a5c;
+}
+
+.invite-action.danger {
+    color: #d64545;
+}
+
+.end-lesson-button {
+    margin-top: 16px;
+    width: 100%;
+    background: #fff0ec;
+    color: #d64545;
+}
+
+.live-student-cursor {
+    position: absolute;
+    z-index: 30;
+    pointer-events: none;
+    display: flex;
+    align-items: flex-start;
+    gap: 2px;
+    transition: left .06s linear, top .06s linear;
+}
+
+.live-student-cursor span {
+    margin-top: 12px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: currentColor;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    -webkit-text-fill-color: white;
+}
+
+
+.live-section {
+    margin-bottom: 22px;
+}
+
+.live-heading {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #d64545;
+}
+
+.live-pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #e5484d;
+    animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+.live-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+}
+
+.live-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    text-align: left;
+    border: 1px solid #f3c4c6;
+    border-radius: 8px;
+    background: #fff7f7;
+    cursor: pointer;
+}
+
+.live-card:hover {
+    border-color: #e5484d;
+    box-shadow: 0 4px 14px rgba(229, 72, 77, .14);
+}
+
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e5484d;
+    color: white;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .05em;
+}
+
+.live-badge .live-pulse {
+    background: white;
+}
+
+.live-card-copy {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+}
+
+.live-card-copy strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.live-card-copy span {
+    font-size: 12px;
+    color: #8a94a3;
+}
+
+.live-card-action {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #d64545;
+}
