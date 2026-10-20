@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
 import { Check, Trash2, X } from 'lucide-react'
 
@@ -60,10 +60,13 @@ function tileSize(text: string) {
     return syllableLabelSizes[text] ?? { width: TILE_W, height: TILE_H }
 }
 
-export default function BlendingBoard({ tiles, setTiles, onClose }: {
+export default function BlendingBoard({ tiles, setTiles, onClose, readOnly = false, color, onColorChange }: {
     tiles: BlendTile[]
     setTiles: Dispatch<SetStateAction<BlendTile[]>>
     onClose: () => void
+    readOnly?: boolean
+    color?: string | null
+    onColorChange?: (color: string) => void
 }) {
     const canvasRef = useRef<HTMLDivElement>(null)
     const [drag, setDrag] = useState<Drag | null>(null)
@@ -76,6 +79,8 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
     })
     const tilesRef = useRef(tiles)
     tilesRef.current = tiles
+    const accentColor = readOnly && color ? color : boardColor
+    useEffect(() => { onColorChange?.(boardColor) }, [boardColor])
 
     function startDrag(event: ReactPointerEvent<HTMLElement>, text: string, tileId: string | null, kind?: string) {
         event.preventDefault()
@@ -139,12 +144,12 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
         }
     }
 
-    return <div className="blending-board" style={{ ['--board-accent' as string]: boardColor }}>
-        <div className="blending-tabs">
+    return <div className={`blending-board${readOnly ? ' read-only' : ''}`} style={{ ['--board-accent' as string]: accentColor }}>
+        {!readOnly && <div className="blending-tabs">
             {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} disabled={tab !== 'Basic Tiles' && tab !== 'Glued Sounds' && tab !== 'Advanced Vowels' && tab !== 'Prefixes, Roots & Suffixes' && tab !== 'Capital Letters' && tab !== 'Syllable Labels'} onClick={() => setActiveTab(tab)}>{tab}</button>)}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
-        </div>
-        <div className="blending-tray">
+        </div>}
+        {!readOnly && <div className="blending-tray">
             {tabs.filter((tab) => tab === 'Basic Tiles' || tab === 'Glued Sounds' || tab === 'Advanced Vowels' || tab === 'Prefixes, Roots & Suffixes' || tab === 'Capital Letters' || tab === 'Syllable Labels').map((tab) => <div key={tab} className={`blending-tray-panel ${tab === activeTab ? 'active' : ''}`} aria-hidden={tab !== activeTab}>
             {tab === 'Syllable Labels' ? <div className="blending-syllable-labels" role="group" aria-label="Syllable labels">
                 {syllableLabels.map((text) => {
@@ -178,9 +183,9 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
                 </div>
             </>}
             </div>)}
-        </div>
+        </div>}
         <div className="blending-canvas" ref={canvasRef}>
-            {activeTab === 'Syllable Labels' ? <aside className="syllable-instructions" aria-label="Instructions">
+            {readOnly ? null : activeTab === 'Syllable Labels' ? <aside className="syllable-instructions" aria-label="Instructions">
                 <strong>Instructions</strong>
                 <ol>
                     <li>Write or build a word</li>
@@ -197,15 +202,15 @@ export default function BlendingBoard({ tiles, setTiles, onClose }: {
             </div>}
             {tiles.map((tile) => {
                 const size = tileSize(tile.text)
-                return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${tile.kind ? `affix-${tile.kind}` : ''} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title="Double-click to delete" onPointerDown={(event) => startDrag(event, tile.text, tile.id, tile.kind)} onDoubleClick={() => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
+                return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${tile.kind ? `affix-${tile.kind}` : ''} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title={readOnly ? undefined : 'Double-click to delete'} onPointerDown={readOnly ? undefined : (event) => startDrag(event, tile.text, tile.id, tile.kind)} onDoubleClick={readOnly ? undefined : () => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
             })}
-            {tiles.length === 0 && activeTab !== 'Syllable Labels' && <span className="blending-hint">Drag tiles here to build words</span>}
+            {!readOnly && tiles.length === 0 && activeTab !== 'Syllable Labels' && <span className="blending-hint">Drag tiles here to build words</span>}
         </div>
-        <div className="blending-footer">
+        {!readOnly && <div className="blending-footer">
             <button onClick={() => setTiles([])} disabled={tiles.length === 0}><Trash2 size={15} /> Clear board</button>
             <span>Drag a tile off the board to remove it</span>
             <div className="accent-swatches" role="radiogroup" aria-label="Canvas color">{boardColors.map((option) => <button key={option.color} role="radio" aria-checked={boardColor === option.color} className={boardColor === option.color ? 'selected' : ''} style={{ background: option.color }} title={`${option.name} canvas`} aria-label={`${option.name} canvas`} onClick={() => { setBoardColor(option.color); window.localStorage.setItem(colorStorageKey, option.color) }}>{boardColor === option.color && <Check size={14} />}</button>)}</div>
-        </div>
+        </div>}
         {drag && drag.tileId === null && (() => {
             const size = tileSize(drag.text)
             return <div className={`canvas-tile ${tileClass(drag.text)} ${drag.kind ? `affix-${drag.kind}` : ''} ${syllableLabelSet.has(drag.text) ? 'canvas-syllable-label' : ''} drag-ghost`} style={{ left: drag.clientX - drag.offsetX, top: drag.clientY - drag.offsetY, width: size.width, height: size.height }}>{drag.text}</div>

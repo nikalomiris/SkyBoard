@@ -6,7 +6,7 @@ import {
     Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, X,
+    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
@@ -98,7 +98,9 @@ function App() {
     const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
 
     // The blending board is a scratch space: reset it whenever a lesson is opened, switched or closed.
+    const [blendColor, setBlendColor] = useState<string | null>(null)
     useEffect(() => {
+        if (studentView) return
         setBlendTiles([])
         setShowBlend(false)
     }, [openLesson?.id])
@@ -133,7 +135,9 @@ function App() {
     const [imageQuery, setImageQuery] = useState('')
     const [imageUrl, setImageUrl] = useState('')
     const [showFileMenu, setShowFileMenu] = useState<string | null>(null)
-    const [isFollowing, setIsFollowing] = useState(false)
+    const [studentCount, setStudentCount] = useState(0)
+    const [studentLocked, setStudentLocked] = useState(false)
+    const isFollowing = studentCount > 0
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [draggedPageIndex, setDraggedPageIndex] = useState<number | null>(null)
     const [folderMenu, setFolderMenu] = useState<string | null>(null)
@@ -146,6 +150,8 @@ function App() {
     const [editingTextId, setEditingTextId] = useState<string | null>(null)
     const [, setHistoryTick] = useState(0)
     const stageRef = useRef<HTMLDivElement>(null)
+    const workspaceRef = useRef<HTMLDivElement>(null)
+    const [toolOptionsTop, setToolOptionsTop] = useState(10)
     const itemGestureRef = useRef<ItemGesture | null>(null)
     const historyRef = useRef<Record<string, { past: BoardItem[][]; future: BoardItem[][] }>>({})
     const imageInputRef = useRef<HTMLInputElement>(null)
@@ -153,6 +159,14 @@ function App() {
     const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
     const workspaceSaveVersion = useRef(0)
+
+    useLayoutEffect(() => {
+        const button = document.querySelector<HTMLElement>(`.tool-rail [data-tool-id="${activeTool}"]`)
+        const workspace = workspaceRef.current
+        if (!button || !workspace) return
+        const top = button.getBoundingClientRect().top - workspace.getBoundingClientRect().top
+        setToolOptionsTop(Math.max(10, Math.round(top)))
+    })
 
     useEffect(() => {
         if (!supabase || studentView) {
@@ -263,10 +277,26 @@ function App() {
     }
     const openLessonIdRef = useRef<string | null>(null)
     openLessonIdRef.current = openLesson?.id ?? null
+    const blendStateRef = useRef({ open: showBlend, tiles: blendTiles, color: blendColor })
+    blendStateRef.current = { open: showBlend, tiles: blendTiles, color: blendColor }
+    const studentLockedRef = useRef(studentLocked)
+    studentLockedRef.current = studentLocked
+    const broadcastLock = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'lock', payload: { locked: studentLockedRef.current } })
+    }
+    const broadcastBlendState = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'blend', payload: blendStateRef.current })
+    }
     const broadcastLiveState = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'state', payload: liveStateRef.current })
+        broadcastBlendState()
+        broadcastLock()
     }
 
     // Teacher: publish the current page (and its content) to every student on the shared link.
@@ -276,6 +306,10 @@ function App() {
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
         channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
+        channel.on('presence', { event: 'sync' }, () => {
+            const members = Object.values(channel.presenceState()).flat() as unknown as { role?: string }[]
+            setStudentCount(members.filter((member) => member.role === 'student').length)
+        })
         channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
@@ -292,6 +326,7 @@ function App() {
         return () => {
             liveSubscribedRef.current = false
             liveChannelRef.current = null
+            setStudentCount(0)
             void supabase?.removeChannel(channel)
         }
     }, [shareToken, studentView])
@@ -300,6 +335,15 @@ function App() {
         const timeout = window.setTimeout(broadcastLiveState, 120)
         return () => window.clearTimeout(timeout)
     }, [shareToken, studentView, pageIndex, pages, currentItems, background])
+
+    useEffect(() => {
+        if (!shareToken || studentView) return
+        broadcastLock()
+    }, [shareToken, studentView, studentLocked])
+    useEffect(() => {
+        if (!shareToken || studentView) return
+        broadcastBlendState()
+    }, [shareToken, studentView, showBlend, blendTiles, blendColor])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -353,8 +397,17 @@ function App() {
             setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background })
             setSelectedItemId(null)
         })
+        channel.on('broadcast', { event: 'lock' }, ({ payload }) => setStudentLocked(Boolean((payload as { locked?: boolean })?.locked)))
+        channel.on('broadcast', { event: 'blend' }, ({ payload }) => {
+            const blend = payload as { open: boolean; tiles: BlendTile[]; color: string | null }
+            if (!blend || !Array.isArray(blend.tiles)) return
+            setBlendTiles(blend.tiles)
+            setBlendColor(blend.color ?? null)
+            setShowBlend(Boolean(blend.open))
+        })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
+            if (status === 'SUBSCRIBED') void channel.track({ role: 'student' })
             if (status === 'SUBSCRIBED') void channel.send({ type: 'broadcast', event: 'hello', payload: {} })
         })
         return () => {
@@ -1438,9 +1491,10 @@ function App() {
                 <div className="topbar-center"><span className="workspace-dot" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : <span className="crumb-current">My workspace</span>}</div>
                 <div className="topbar-actions">
                     {openLesson ? <>
-                        {!studentView && <button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={() => { setIsFollowing(!isFollowing); notify(isFollowing ? 'Student view ended' : 'Student is following your page') }}><Users size={16} />{isFollowing ? 'Student following' : 'Student view'}<span className="online-dot" /></button>}
+                        {!studentView && <><button className={`follow-button ${isFollowing ? 'following' : ''}`} title={isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => notify(isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student has opened the share link yet')}><Users size={16} />{isFollowing ? 'Student connected' : 'No student'}<span className="online-dot" /></button>
+                        <button className={`follow-button lock-button ${studentLocked ? 'following' : ''}`} aria-pressed={studentLocked} title={studentLocked ? 'Let the student interact again' : 'Lock the student out of the lesson'} onClick={() => setStudentLocked(!studentLocked)}>{studentLocked ? <Lock size={16} /> : <Unlock size={16} />}{studentLocked ? 'Student locked' : 'Lock student'}</button></>}
                         {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
-                        <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>
+                        {!studentView && <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>}
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
                 </div>
@@ -1541,14 +1595,14 @@ function App() {
                         {!studentView && <><button className="rail-back" onClick={() => setOpenLesson(null)} title="Back to library"><ArrowLeft size={18} /></button>
                             <div className="rail-divider" /></>}
                         {<>
-                            {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
+                            {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} data-tool-id={toolId} disabled={studentView && studentLocked} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
                             {!studentView && <><div className="rail-spacer" />
                             <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}</>}
                     </aside>
                     <main className="board-main">
                         <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
-                            <div className="page-directory-anchor">
+                            {!studentView && <div className="page-directory-anchor">
                                 <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
                                 {showPageDirectory && openLesson && <div className="page-directory-menu">{pages.map((page, index) => {
                                     const key = `${openLesson.id}:${index}`
@@ -1557,32 +1611,34 @@ function App() {
                                         <span className="page-directory-label"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><span className="page-directory-name">{page}</span></span>
                                     </button>
                                 })}</div>}
-                            </div>
-                            <div className="board-toolbar-right"><button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
+                            </div>}
+                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
-                        <div className="canvas-workspace">
+                        <div className="canvas-workspace" ref={workspaceRef}>
+                            {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} onClose={() => setShowBlend(false)} />}
+                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
+                            <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                             {renderSelectedItemToolbar()}
                             {renderToolColorToolbar()}
                             {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
                                 <span>Cell {activeGridCell.index + 1}</span>
-                                <span>{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
                                 <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                <span className="size-readout">{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
                                 <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
                                 <select className="selection-font-picker" value={selectedGridCellStyle?.fontFamily ?? selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Cell text font" title="Cell text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
                             </div>}
                             {!studentView && selectedItem?.type === 'note' && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
                                 <span>Note text</span>
-                                <span>{selectedItem.fontSize ?? 14}px</span>
                                 <button type="button" title="Decrease note text size" aria-label="Decrease note text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                <span className="size-readout">{selectedItem.fontSize ?? 14}px</span>
                                 <button type="button" title="Increase note text size" aria-label="Increase note text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
                                 <select className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Note text font" title="Note text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
                             </div>}
                             {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select></div>}
+                            </div>
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
-                                    {isFollowing && <div className="student-cursor"><span className="student-cursor-dot" /> Student is here</div>}
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
                                         {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
                                             className="board-text-input"
@@ -1631,7 +1687,7 @@ function App() {
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>
+                            {!studentView && <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>}
                         </div>
                     </main>
                 </div>

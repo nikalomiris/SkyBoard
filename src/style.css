@@ -1764,10 +1764,11 @@ kbd {
 
 .page-directory-menu button {
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    justify-items: center;
+    align-items: center;
+    gap: 4px;
     padding: 6px;
     border: 1px solid transparent;
     border-radius: 6px;
@@ -1976,15 +1977,14 @@ kbd {
 }
 
 .selection-toolbar {
-    position: absolute;
-    z-index: 4;
-    top: 10px;
-    right: 12px;
-    min-height: 34px;
-    padding: 3px 5px 3px 10px;
-    display: flex;
+    position: static;
+    width: 138px;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    justify-items: center;
     align-items: center;
-    gap: 3px;
+    gap: 4px;
     border: 1px solid color-mix(in srgb, var(--accent) 18%, white);
     border-radius: 5px;
     background: #fff;
@@ -2018,15 +2018,14 @@ kbd {
 
 .grid-text-toolbar,
 .text-font-toolbar {
-    position: absolute;
-    z-index: 4;
-    top: 52px;
-    right: 12px;
-    min-height: 34px;
-    padding: 4px 7px;
-    display: flex;
+    position: static;
+    width: 138px;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    justify-items: center;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     border: 1px solid color-mix(in srgb, var(--accent) 18%, white);
     border-radius: 5px;
     background: #fff;
@@ -2058,7 +2057,8 @@ kbd {
 }
 
 .selection-font-picker {
-    width: 112px;
+    width: 100%;
+    min-width: 0;
     height: 27px;
     flex: 0 0 auto;
     padding: 0 5px;
@@ -2092,14 +2092,19 @@ kbd {
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-right: 4px;
-    padding-right: 6px;
-    border-right: 1px solid color-mix(in srgb, var(--accent) 16%, white);
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding-bottom: 6px;
+    width: 100%;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, white);
 }
 
 .selection-text-colors button {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: 2px solid transparent;
     border-radius: 50%;
@@ -4472,4 +4477,70 @@ kbd {
 
 .accent-swatches button.selected {
     box-shadow: 0 0 0 2px #283a35;
+}
+
+.blending-board.read-only .blending-canvas {
+    pointer-events: none;
+}
+
+.student-lock-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 8px;
+    padding-top: 14px;
+    cursor: not-allowed;
+    font-size: 13px;
+    font-weight: 700;
+    color: #444;
+}
+
+.tool-options-stack {
+    position: absolute;
+    z-index: 4;
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.tool-options-stack>* {
+    pointer-events: auto;
+}
+
+.selection-toolbar>span {
+    text-align: center;
+    margin-right: 0;
+}
+
+.selection-toolbar>button,
+.selection-toolbar button {
+    align-self: center;
+}
+
+.selection-toolbar>span,
+.grid-text-toolbar>span:not(.size-readout),
+.text-font-toolbar>label,
+.grid-text-toolbar>select,
+.text-font-toolbar>select,
+.selection-toolbar>.selection-font-picker {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    margin: 0;
+}
+
+.selection-toolbar>span,
+.grid-text-toolbar>span,
+.text-font-toolbar>label {
+    text-align: center;
+}
+
+.grid-text-toolbar>.size-readout {
+    margin: 0;
+    font-weight: 700;
+    text-align: center;
 }
