@@ -15,7 +15,7 @@ import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { createLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
+import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
@@ -889,6 +889,18 @@ function App() {
             setLockedInviteIds((previous) => previous.filter((id) => id !== invite.id))
             sendLive('kick', { ids: [invite.id], reason: 'removed' })
         }
+    }
+
+    async function deleteInvite(invite: LessonInvite) {
+        try {
+            await deletePendingLessonInvite(invite.id)
+        } catch (error) {
+            setShareLinkError(error instanceof Error ? error.message : 'Unable to delete this student link.')
+            return
+        }
+        setInvites((previous) => previous.filter((item) => item.id !== invite.id))
+        setOnlineInviteIds((previous) => previous.filter((id) => id !== invite.id))
+        setShareLinkError('')
     }
 
     async function removeAllStudents() {
@@ -2029,7 +2041,7 @@ function App() {
                         <div className="share-live-status"><span className="live-dot" />Lesson room is live{shareExpiresAt ? ` · links expire ${new Date(shareExpiresAt).toLocaleDateString()}` : ''}</div>
                         <form className="invite-form" onSubmit={(event) => { event.preventDefault(); void addInvite() }}><input value={newInviteName} onChange={(event) => setNewInviteName(event.target.value)} placeholder="Student name, e.g. Maya" aria-label="Student name" maxLength={40} /><button type="submit"><Plus size={15} /> Add</button></form>
                         <label className="invite-approval"><input type="checkbox" checked={requireApproval} onChange={(event) => setRequireApproval(event.target.checked)} /> Ask me before a new student joins</label>
-                        <div className="invite-list">{invites.length === 0 ? <p className="share-link-status">Add a student to get their personal link.</p> : invites.map((invite) => { const online = onlineInviteIds.includes(invite.id); const state = invite.status === 'removed' ? 'Removed' : invite.status === 'pending' ? (online ? 'Waiting to join' : 'Not joined yet') : online ? 'Connected' : 'Offline'; return <div className={`invite-row ${invite.status}`} key={invite.id}><span className="invite-dot" style={{ background: invite.color }} /><div className="invite-info"><strong>{invite.label}</strong><small className={online && invite.status !== 'removed' ? 'online' : ''}>{state}</small></div><button className="invite-copy" onClick={() => copyInviteLink(invite)}>{copiedInviteId === invite.id ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>{invite.status === 'pending' && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Admit</button>}{invite.status === 'admitted' && <button className="invite-action danger" onClick={() => void setInviteState(invite, 'removed')}>Remove</button>}{invite.status === 'removed' && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Let back in</button>}</div> })}</div>
+                        <div className="invite-list">{invites.length === 0 ? <p className="share-link-status">Add a student to get their personal link.</p> : invites.map((invite) => { const online = onlineInviteIds.includes(invite.id); const state = invite.status === 'removed' ? 'Removed' : invite.status === 'pending' ? (online ? 'Waiting to join' : 'Not joined yet') : online ? 'Connected' : 'Offline'; return <div className={`invite-row ${invite.status}`} key={invite.id}><span className="invite-dot" style={{ background: invite.color }} /><div className="invite-info"><strong>{invite.label}</strong><small className={online && invite.status !== 'removed' ? 'online' : ''}>{state}</small></div><button className="invite-copy" onClick={() => copyInviteLink(invite)}>{copiedInviteId === invite.id ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy link</>}</button>{invite.status === 'pending' && online && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Admit</button>}{invite.status === 'pending' && !online && <button className="invite-action danger invite-delete" aria-label={`Delete ${invite.label}'s link`} title="Delete link" onClick={() => void deleteInvite(invite)}><Trash2 size={14} /> Delete</button>}{invite.status === 'admitted' && <button className="invite-action danger" onClick={() => void setInviteState(invite, 'removed')}>Remove</button>}{invite.status === 'removed' && <button className="invite-action" onClick={() => void setInviteState(invite, 'admitted')}>Let back in</button>}</div> })}</div>
                         <button className="end-lesson-button" onClick={() => void endLesson()}><LogOut size={15} /> End lesson for everyone</button>
                     </>}
                 </>}

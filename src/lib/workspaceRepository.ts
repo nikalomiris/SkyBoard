@@ -435,6 +435,11 @@ export async function setLessonInviteStatus(inviteId: string, status: LessonInvi
     if (result.error) throw new Error(result.error.message)
 }
 
+export async function deletePendingLessonInvite(inviteId: string): Promise<void> {
+    const result = await getClient().rpc('delete_pending_lesson_invite', { p_invite_id: inviteId })
+    if (result.error) throw new Error(result.error.message)
+}
+
 export async function listLiveLessonIds(): Promise<string[]> {
     const result = await getClient().from('lesson_sessions').select('lesson_id').eq('status', 'active').gt('expires_at', new Date().toISOString())
     if (result.error) throw new Error(result.error.message)
