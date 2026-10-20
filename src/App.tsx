@@ -255,6 +255,12 @@ function App() {
     const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
     const liveSubscribedRef = useRef(false)
     const studentEditPendingRef = useRef(false)
+    type LiveDraft = { kind: 'ink' | 'eraser' | 'laser'; pageIndex: number; points: string; color: string; width: number; opacity: number }
+    const [remoteDraft, setRemoteDraft] = useState<LiveDraft | null>(null)
+    const handleRemoteDraft = ({ payload }: { payload: unknown }) => {
+        const draft = payload as LiveDraft | null
+        setRemoteDraft(draft && draft.points && draft.pageIndex === liveStateRef.current.pageIndex ? draft : null)
+    }
     const openLessonIdRef = useRef<string | null>(null)
     openLessonIdRef.current = openLesson?.id ?? null
     const broadcastLiveState = () => {
@@ -270,9 +276,11 @@ function App() {
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
         channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
+        channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
             const edit = payload as { pageIndex: number; items: BoardItem[] }
+            setRemoteDraft(null)
             const lessonId = openLessonIdRef.current
             if (!lessonId || !edit || !Array.isArray(edit.items) || edit.pageIndex !== liveStateRef.current.pageIndex) return
             setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${edit.pageIndex}`]: edit.items }))
@@ -293,6 +301,28 @@ function App() {
         return () => window.clearTimeout(timeout)
     }, [shareToken, studentView, pageIndex, pages, currentItems, background])
 
+    // Both sides: stream the stroke being drawn so the other side sees it while it is written.
+    const lastDraftSentRef = useRef(0)
+    const draftActive = Boolean(currentPoints) && (activeTool === 'laser' || (drawing && ['pen', 'brush', 'highlighter', 'eraser'].includes(activeTool)))
+    useEffect(() => {
+        if (!shareToken && !studentView) return
+        const send = (payload: LiveDraft | null) => {
+            const channel = liveChannelRef.current
+            if (channel && liveSubscribedRef.current) void channel.send({ type: 'broadcast', event: 'draft', payload })
+        }
+        if (!draftActive) {
+            if (lastDraftSentRef.current) { lastDraftSentRef.current = 0; send(null) }
+            return
+        }
+        const style = activeTool === 'highlighter' ? { width: 24, opacity: 0.42 } : activeTool === 'brush' ? { width: 11, opacity: 0.76 } : { width: 3, opacity: 1 }
+        const delay = Math.max(0, 40 - (Date.now() - lastDraftSentRef.current))
+        const timeout = window.setTimeout(() => {
+            lastDraftSentRef.current = Date.now()
+            send({ kind: activeTool === 'eraser' ? 'eraser' : activeTool === 'laser' ? 'laser' : 'ink', pageIndex, points: currentPoints, color: ink, ...style })
+        }, delay)
+        return () => window.clearTimeout(timeout)
+    }, [draftActive, currentPoints, shareToken, studentView])
+
     // Student: send local edits back to the teacher.
     useEffect(() => {
         if (!studentView || !studentEditPendingRef.current) return
@@ -310,10 +340,12 @@ function App() {
         const channel = client.channel(`lesson-live:${token}`)
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
+        channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
         channel.on('broadcast', { event: 'state' }, ({ payload }) => {
             const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string }
             if (!live || !Array.isArray(live.pages) || !Array.isArray(live.items)) return
             liveReceivedRef.current = true
+            setRemoteDraft(null)
             const visible = live.items.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
             setPages(live.pages)
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
@@ -1587,6 +1619,14 @@ function App() {
                                             return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
                                         })()}
                                         {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
+                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
+                                            const remotePoints = parsePoints(remoteDraft.points)
+                                            const [lastX, lastY] = remotePoints[remotePoints.length - 1]
+                                            return remoteDraft.kind === 'eraser'
+                                                ? <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
+                                                : <circle cx={lastX} cy={lastY} r={9} fill="#ef6b58" fillOpacity={0.85} pointerEvents="none" />
+                                        })()}
+                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind === 'ink' && <polyline points={remoteDraft.points} fill="none" stroke={remoteDraft.color} strokeWidth={remoteDraft.width} strokeOpacity={remoteDraft.opacity} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
                                     </svg>
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
