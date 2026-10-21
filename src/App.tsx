@@ -1244,6 +1244,17 @@ function App() {
         setSelectedItemId(null)
     }
 
+    function removeDeckPage() {
+        if (!openLesson) return
+        const lessonId = openLesson.id
+        const existing = pages.findIndex((_, index) => (itemsByPage[`${lessonId}:${index}`] ?? []).some((item) => item.id.startsWith(DECK_ITEM_PREFIX)))
+        if (existing < 0) return
+        if (pages.length > 1) return removePageAt(existing)
+        // A lesson always keeps one page, so an only page is emptied instead.
+        delete historyRef.current[`${lessonId}:${existing}`]
+        setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${existing}`]: [] }))
+    }
+
     function duplicatePage() {
         insertPage(pageIndex + 1, `${pages[pageIndex]} copy`, currentItems, backgroundsByPage[currentPageKey])
     }
@@ -1263,25 +1274,29 @@ function App() {
     }
 
     function deletePage() {
+        removePageAt(pageIndex)
+    }
+
+    function removePageAt(removeIndex: number) {
         if (pages.length <= 1) return
         if (!openLesson) return
         const lessonId = openLesson.id
-        const nextPages = pages.filter((_, index) => index !== pageIndex)
+        const nextPages = pages.filter((_, index) => index !== removeIndex)
         const shiftDown = <T,>(map: Record<string, T>) => {
             const next = { ...map }
-            for (let i = pageIndex; i < pages.length; i++) {
+            for (let i = removeIndex; i < pages.length; i++) {
                 const from = `${lessonId}:${i + 1}`
                 if (i + 1 < pages.length && from in map) next[`${lessonId}:${i}`] = map[from]
                 else delete next[`${lessonId}:${i}`]
             }
             return next
         }
-        for (let i = pageIndex; i < pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
+        for (let i = removeIndex; i < pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
         setItemsByPage(shiftDown)
         setBackgroundsByPage(shiftDown)
         updateLessonPages(nextPages)
-        const nextIndex = Math.max(0, pageIndex - 1)
-        setPageIndex(nextIndex)
+        setPageIndex(removeIndex < pageIndex ? pageIndex - 1 : removeIndex === pageIndex ? Math.max(0, pageIndex - 1) : pageIndex)
+        setSelectedItemId(null)
     }
 
     function coordinates(event: { clientX: number; clientY: number }) {
@@ -1947,7 +1962,7 @@ function App() {
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
+                            {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                             {renderSelectedItemToolbar()}
