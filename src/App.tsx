@@ -1569,15 +1569,17 @@ function App() {
         updateCurrentItems((items) => items.map((item) => {
             if (item.id !== itemId || item.type !== 'grid') return item
             const oldCols = item.cols ?? 3
+            const oldRows = item.rows ?? 3
             const values = Array.from({ length: rows * cols }, (_, index) => {
                 const row = Math.floor(index / cols)
                 const col = index % cols
-                const oldIndex = row * oldCols + col
-                return item.values[oldIndex] ?? ''
+                if (col >= oldCols || row >= oldRows) return ''
+                return item.values[row * oldCols + col] ?? ''
             })
             const cellStyles = item.cellStyles && Array.from({ length: rows * cols }, (_, index) => {
                 const row = Math.floor(index / cols)
                 const col = index % cols
+                if (col >= oldCols || row >= oldRows) return {}
                 return item.cellStyles?.[row * oldCols + col] ?? {}
             })
             return { ...item, rows, cols, values, ...(cellStyles ? { cellStyles } : {}) }
