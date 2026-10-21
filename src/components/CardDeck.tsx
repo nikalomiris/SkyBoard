@@ -18,25 +18,27 @@ const deckNoteColors: Record<string, string> = { 'deck-vowel': '#ffe94d', 'deck-
 // Lays the selected tiles out as colour-coded notes, shrinking them until they all fit on the 1000x620 page.
 export function buildDeckPageItems(tiles: DeckTile[]): BoardItem[] {
     const margin = 30
+    const gridTop = 100
     const gap = 12
     let scale = 0.5
     const fits = (candidate: number) => {
         const columns = Math.floor((1000 - margin * 2 + gap) / (190 * candidate + gap))
-        const rows = Math.floor((620 - margin * 2 + gap) / (170 * candidate + gap))
+        const rows = Math.floor((620 - gridTop - margin + gap) / (170 * candidate + gap))
         return columns > 0 && columns * rows >= tiles.length
     }
     while (scale > 0.12 && !fits(scale)) scale -= 0.02
     const columns = Math.max(1, Math.floor((1000 - margin * 2 + gap) / (190 * scale + gap)))
-    return tiles.map((tile, index) => ({
+    const title: BoardItem = { id: `${DECK_ITEM_PREFIX}title`, type: 'text', left: 3, top: 9.7, text: 'Card Deck', color: '#253c37', size: 40 }
+    return [title, ...tiles.map((tile, index) => ({
         id: `${DECK_ITEM_PREFIX}${index}`,
         type: 'note' as const,
         left: (margin + (index % columns) * (190 * scale + gap)) / 10,
-        top: (margin + Math.floor(index / columns) * (170 * scale + gap)) / 6.2,
+        top: (gridTop + Math.floor(index / columns) * (170 * scale + gap)) / 6.2,
         text: tile.text,
         color: deckNoteColors[deckTileClass(tile)],
         fontSize: 56,
         scale,
-    }))
+    }))]
 }
 
 function deckTileClass(tile: DeckTile) {
@@ -81,9 +83,14 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
     const selectedKeys = new Set((ready ? config?.tiles ?? [] : draft).map(deckTileKey))
     const shownKeys = new Set(session.order.slice(0, session.index + 1).map(deckTileKey))
 
+    // Selection changes are saved with the lesson straight away (still unconfirmed) so they survive closing the deck.
+    function updateDraft(next: DeckTile[]) {
+        setDraft(next)
+        onConfigChange?.({ tiles: next, ready: false })
+    }
     function toggle(target: DeckTile) {
         const key = deckTileKey(target)
-        setDraft((previous) => previous.some((item) => deckTileKey(item) === key) ? previous.filter((item) => deckTileKey(item) !== key) : [...previous, target])
+        updateDraft(draft.some((item) => deckTileKey(item) === key) ? draft.filter((item) => deckTileKey(item) !== key) : [...draft, target])
     }
     function start() {
         if (!config?.tiles.length) return
@@ -123,7 +130,7 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
         </div> : <div className="deck-prep">
             <div className="deck-prep-bar">
                 <span role="status">{draft.length} tile{draft.length === 1 ? '' : 's'} selected</span>
-                <button onClick={() => setDraft([])} disabled={!draft.length}>Clear</button>
+                <button onClick={() => updateDraft([])} disabled={!draft.length}>Clear</button>
                 <button className="primary" disabled={!draft.length} onClick={() => onConfigChange?.({ tiles: draft, ready: true })}><Lock size={14} /> Confirm deck ready</button>
             </div>
             <div className="deck-prep-groups">

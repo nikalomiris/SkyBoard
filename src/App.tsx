@@ -95,7 +95,7 @@ function App() {
         return active && active.lessonId === openLesson?.id ? Math.min(active.pageIndex, Math.max(0, pages.length - 1)) : 0
     })
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
-    const [activeTool, setActiveTool] = useState<Tool>(() => new URLSearchParams(window.location.search).get('view') === 'student' ? 'pen' : 'select')
+    const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'square' | 'triangle' | 'line' | 'arrow'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
@@ -1290,7 +1290,7 @@ function App() {
     }
 
     function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: 'move' | 'resize' = 'move') {
-        if (activeTool !== 'select') return
+        if (activeTool !== 'select' || studentView) return
         setSelectedItemId(item.id)
         event.stopPropagation()
         if (event.target instanceof HTMLInputElement) {
@@ -1872,7 +1872,7 @@ function App() {
                                 const studentFolder = lesson.folder.split(folderSeparator, 1)[0]
                                 const studentFolderIndex = orderedFolders.indexOf(studentFolder)
                                 return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
+                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
                                     <div className="lesson-info">
                                         <div className="lesson-name-line">
                                             {renamingLessonId === lesson.id ? (
@@ -1921,7 +1921,7 @@ function App() {
                         {!studentView && <><button className="rail-back" onClick={() => setOpenLesson(null)} title="Back to library"><ArrowLeft size={18} /></button>
                             <div className="rail-divider" /></>}
                         {<>
-                            {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} data-tool-id={toolId} disabled={studentView && studentLocked} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
+                            {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} data-tool-id={toolId} disabled={studentView && studentLocked} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { if (studentView && activeTool === toolId) { setActiveTool('select'); return } setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
                             {!studentView && <><div className="rail-spacer" />
                             <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}</>}
                     </aside>
@@ -1971,7 +1971,7 @@ function App() {
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
                                             className="board-text-input"
                                             autoFocus
                                             value={item.text}
