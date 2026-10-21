@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
-    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronRight,
+    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
@@ -102,6 +102,10 @@ function App() {
     const [backgroundScope, setBackgroundScope] = useState<'current' | 'all'>('current')
     const [showBackgrounds, setShowBackgrounds] = useState(false)
     const [showPageDirectory, setShowPageDirectory] = useState(false)
+    const laserFadeRef = useRef(0)
+    const [laserFading, setLaserFading] = useState(false)
+    const [renamingPageIndex, setRenamingPageIndex] = useState<number | null>(null)
+    const [pageRenameValue, setPageRenameValue] = useState('')
     const [showBlend, setShowBlend] = useState(false)
     const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
 
@@ -1155,6 +1159,18 @@ function App() {
         setLessons((previous) => previous.map((lesson) => lesson.id === updatedLesson.id ? updatedLesson : lesson))
     }
 
+    function startRenamePage(index: number) {
+        setRenamingPageIndex(index)
+        setPageRenameValue(pages[index] ?? '')
+    }
+
+    function commitPageRename() {
+        if (renamingPageIndex === null) return
+        const name = pageRenameValue.trim()
+        if (name && name !== pages[renamingPageIndex]) updateLessonPages(pages.map((page, index) => index === renamingPageIndex ? name : page))
+        setRenamingPageIndex(null)
+    }
+
     function insertPage(index: number, name: string, items: BoardItem[], pageBackground?: string) {
         if (!openLesson) return
         const lessonId = openLesson.id
@@ -1408,10 +1424,7 @@ function App() {
             setSelectedItemId(null)
             return
         }
-        if (activeTool === 'laser') {
-            setCurrentPoints(`${stageX},${stageY}`)
-            return
-        }
+        if (activeTool === 'laser') { window.clearTimeout(laserFadeRef.current); setLaserFading(false) }
         stageRef.current.setPointerCapture(event.pointerId)
         setDrawing(true)
         setCurrentPoints(`${stageX},${stageY}`)
@@ -1484,13 +1497,13 @@ function App() {
                 if (item.type !== 'stroke') return true
                 return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, 22 + item.width / 2)
             }))
-        } else if (drawing && currentPoints && activeTool !== 'eraser') {
+        } else if (drawing && currentPoints && activeTool !== 'eraser' && activeTool !== 'laser') {
             const style = activeTool === 'highlighter' ? { color: ink, width: 24, opacity: 0.42 } :
                 activeTool === 'brush' ? { color: ink, width: 11, opacity: 0.76 } :
                     { color: ink, width: 3, opacity: 1 }
             updateCurrentItems((items) => [...items, { id: id(), type: 'stroke', points: currentPoints, ...style }])
         }
-        if (activeTool === 'laser') window.setTimeout(() => setCurrentPoints(''), 650)
+        if (activeTool === 'laser') { setLaserFading(true); laserFadeRef.current = window.setTimeout(() => { setCurrentPoints(''); setLaserFading(false) }, 1500) }
         setDrawing(false)
         if (activeTool !== 'laser') setCurrentPoints('')
     }
@@ -1870,7 +1883,11 @@ function App() {
                         <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
                             {!studentView && <div className="page-directory-anchor">
-                                <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}><List size={15} /> Pages <ChevronDown size={13} /></button>
+                                <div className="page-nav">
+                                    <button className="page-nav-step" aria-label="Previous page" title="Previous page" disabled={pageIndex <= 0} onClick={() => { setPageIndex(pageIndex - 1); setSelectedItemId(null) }}><ChevronLeft size={16} /></button>
+                                    <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}>{pageIndex + 1}/{pages.length}</button>
+                                    <button className="page-nav-step" aria-label="Next page" title="Next page" disabled={pageIndex >= pages.length - 1} onClick={() => { setPageIndex(pageIndex + 1); setSelectedItemId(null) }}><ChevronRight size={16} /></button>
+                                </div>
                                 {showPageDirectory && openLesson && <div className="page-directory-menu">{pages.map((page, index) => {
                                     const key = `${openLesson.id}:${index}`
                                     return <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} title={page} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}>
@@ -1883,7 +1900,7 @@ function App() {
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
-                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className="background-swatch blank" onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className="background-swatch lined" onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className="background-swatch grid-bg" onClick={() => setPageBackground('radial-gradient(#cbd5d0 0.8px, transparent 0.8px)')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#fffef9', '#fff2dd', '#e8f4ee', '#eff1fc', '#fcebe7', '#ffffff'].map((color) => <button key={color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
+                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                             {renderSelectedItemToolbar()}
@@ -1941,7 +1958,7 @@ function App() {
                                             const [lastX, lastY] = erasePoints[erasePoints.length - 1]
                                             return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
                                         })()}
-                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? 'laser-stroke' : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
+                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? `laser-stroke${laserFading ? ' fading' : ''}` : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
                                                                                 {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
                                             const remotePoints = parsePoints(remoteDraft.points)
                                             const [lastX, lastY] = remotePoints[remotePoints.length - 1]
@@ -1955,7 +1972,7 @@ function App() {
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            {!studentView && <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => <button key={`${page}-${index}`} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>}
+                            {!studentView && <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => renamingPageIndex === index ? <div key={`rename-${index}`} className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button key={`${page}-${index}`} title="Double-click to rename" onDoubleClick={() => startRenamePage(index)} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Rename page" aria-label="Rename page" onClick={() => startRenamePage(pageIndex)}><Pencil size={16} /></button><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>}
                         </div>
                     </main>
                 </div>

@@ -2373,6 +2373,14 @@ kbd {
     filter: drop-shadow(0 0 5px #f9aa85);
 }
 
+.laser-stroke.fading {
+    animation: laser-fade 1.5s ease-out forwards;
+}
+
+@keyframes laser-fade {
+    to { opacity: 0; }
+}
+
 .eraser-cursor {
     fill: color-mix(in srgb, color-mix(in srgb, var(--accent) 88%, white) 12%, transparent);
     stroke: color-mix(in srgb, var(--accent) 88%, white);
@@ -2381,8 +2389,8 @@ kbd {
 }
 
 .page-dock {
-    min-height: 62px;
-    flex: 0 0 62px;
+    min-height: 40px;
+    flex: 0 0 40px;
     margin: 0 -28px;
     padding: 0 29px;
     display: flex;
@@ -2445,7 +2453,7 @@ kbd {
 .add-page-tab {
     flex: none;
     width: 33px;
-    margin: 14px 0;
+    margin: 5px 0;
     display: grid;
     place-items: center;
     border: 1px dashed color-mix(in srgb, var(--accent) 27%, white);
@@ -2471,8 +2479,8 @@ kbd {
 
 .page-dock-actions button {
     flex: none;
-    width: 29px;
-    height: 29px;
+    width: 28px;
+    height: 28px;
     display: grid;
     place-items: center;
     border: 0;
@@ -2599,8 +2607,14 @@ kbd {
     color: transparent;
 }
 
-.background-colors button:first-child {
-    color: color-mix(in srgb, var(--accent) 64%, white);
+.background-colors button.selected {
+    color: color-mix(in srgb, var(--accent) 90%, black);
+    box-shadow: 0 0 0 2px white, 0 0 0 4px var(--accent);
+}
+
+.background-swatch.selected span {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
 }
 
 .background-colors button:hover {
@@ -3771,8 +3785,8 @@ kbd {
     }
 
     .page-dock {
-        min-height: 54px;
-        flex-basis: 54px;
+        min-height: 40px;
+        flex-basis: 40px;
         margin: 0 -9px;
         padding: 0 7px;
     }
@@ -5202,4 +5216,36 @@ kbd {
     font-size: 12px;
     font-weight: 700;
     color: #d64545;
+}
+
+.page-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.page-nav-step {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid color-mix(in srgb, var(--accent) 14%, white);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent) 2%, white);
+    color: color-mix(in srgb, var(--accent) 87%, black);
+}
+
+.page-nav-step:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.page-rename-input {
+    width: 120px;
+    border: 0;
+    border-bottom: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    outline: none;
 }
