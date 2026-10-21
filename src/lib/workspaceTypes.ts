@@ -10,8 +10,11 @@ export type BoardItem = { id: string; scale?: number } & (
     | { type: 'pdf'; left: number; top: number; src: string; label: string; storagePath?: string }
 )
 
+export type DeckTile = { text: string; kind?: string }
+export type CardDeckConfig = { tiles: DeckTile[]; ready: boolean }
+
 export type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic' | 'custom'
-export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; updatedAt?: number; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; isMock?: boolean; kind: 'lesson' }
+export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; updatedAt?: number; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; cardDeck?: CardDeckConfig; isMock?: boolean; kind: 'lesson' }
 export type ClipboardPage = { id: string; name: string; sourceLesson: string; items: BoardItem[]; background?: string; copiedAt: string }
 export type PageItems = Record<string, BoardItem[]>
 

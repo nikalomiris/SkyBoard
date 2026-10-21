@@ -6,10 +6,12 @@ import {
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
+    Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
+import CardDeck, { DECK_ITEM_PREFIX, buildDeckPageItems, emptyDeckSession } from './components/CardDeck'
+import type { DeckSession } from './components/CardDeck'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
@@ -25,7 +27,7 @@ import {
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
 import type { ItemBounds, Point } from './lib/boardGeometry'
-import type { BoardItem, ClipboardPage, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
+import type { BoardItem, ClipboardPage, DeckTile, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type ItemGesture =
     | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
@@ -118,7 +120,14 @@ function App() {
         setBlendTiles([])
         setBlendStrokes([])
         setShowBlend(false)
+        setShowDeck(false)
+        setDeckSession(emptyDeckSession)
     }, [openLesson?.id])
+    // The deck selection is saved with the lesson; the session (random order and position) is transient.
+    const [showDeck, setShowDeck] = useState(false)
+    const [deckSession, setDeckSession] = useState<DeckSession>(emptyDeckSession)
+    const [remoteDeckTile, setRemoteDeckTile] = useState<DeckTile | null>(null)
+    const deckConfig = lessons.find((lesson) => lesson.id === openLesson?.id)?.cardDeck
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
@@ -330,6 +339,8 @@ function App() {
     openLessonIdRef.current = openLesson?.id ?? null
     const blendStateRef = useRef({ open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor })
     blendStateRef.current = { open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor }
+    const deckStateRef = useRef<{ open: boolean; tile: DeckTile | null }>({ open: false, tile: null })
+    deckStateRef.current = { open: showDeck, tile: deckSession.order[deckSession.index] ?? null }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
     const lockedInviteIdsRef = useRef(lockedInviteIds)
@@ -344,11 +355,17 @@ function App() {
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'blend', payload: blendStateRef.current })
     }
+    const broadcastDeckState = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'deck', payload: deckStateRef.current })
+    }
     const broadcastLiveState = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'state', payload: liveStateRef.current })
         broadcastBlendState()
+        broadcastDeckState()
         broadcastLock()
     }
 
@@ -411,6 +428,10 @@ function App() {
         if (!shareSessionId || studentView) return
         broadcastBlendState()
     }, [shareSessionId, studentView, showBlend, blendTiles, blendStrokes, blendColor])
+    useEffect(() => {
+        if (!shareSessionId || studentView) return
+        broadcastDeckState()
+    }, [shareSessionId, studentView, showDeck, deckSession])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -497,6 +518,12 @@ function App() {
             setBlendColor(blend.color ?? null)
             setShowBlend(Boolean(blend.open))
         })
+        channel.on('broadcast', { event: 'deck' }, ({ payload }) => {
+            if (!admitted()) return
+            const deck = payload as { open?: boolean; tile?: DeckTile | null }
+            setRemoteDeckTile(deck?.tile && typeof deck.tile.text === 'string' ? deck.tile : null)
+            setShowDeck(Boolean(deck?.open))
+        })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
             if (status !== 'SUBSCRIBED') return
@@ -555,7 +582,7 @@ function App() {
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:items', JSON.stringify(itemsByPage)) }, [itemsByPage])
     useEffect(() => { if (!isSupabaseConfigured) window.localStorage.setItem('skyboard:backgrounds', JSON.stringify(backgroundsByPage)) }, [backgroundsByPage])
     useEffect(() => {
-        if (!supabase || !authSession || !workspaceReady || studentView) return
+        if (!supabase || !authSession || !workspaceReady || workspaceError || studentView) return
         const ownerId = authSession.user.id
         const version = ++workspaceSaveVersion.current
         const timeout = window.setTimeout(() => {
@@ -572,7 +599,7 @@ function App() {
             })
         }, 450)
         return () => window.clearTimeout(timeout)
-    }, [authSession?.user.id, workspaceReady, studentView, folders, lessons, itemsByPage, backgroundsByPage])
+    }, [authSession?.user.id, workspaceReady, workspaceError, studentView, folders, lessons, itemsByPage, backgroundsByPage])
     useEffect(() => {
         const client = supabase
         if (!client || !authSession || studentView) return
@@ -1204,6 +1231,19 @@ function App() {
         setSelectedItemId(null)
     }
 
+    // Writes the confirmed deck onto a lesson page, creating the page the first time and refreshing it afterwards.
+    function syncDeckPage(tiles: DeckTile[]) {
+        if (!openLesson) return
+        const lessonId = openLesson.id
+        const items = buildDeckPageItems(tiles)
+        const existing = pages.findIndex((_, index) => (itemsByPage[`${lessonId}:${index}`] ?? []).some((item) => item.id.startsWith(DECK_ITEM_PREFIX)))
+        const index = existing >= 0 ? existing : pages.length
+        delete historyRef.current[`${lessonId}:${index}`]
+        if (existing < 0) updateLessonPages([...pages, 'Card Deck'])
+        setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${index}`]: items }))
+        setSelectedItemId(null)
+    }
+
     function duplicatePage() {
         insertPage(pageIndex + 1, `${pages[pageIndex]} copy`, currentItems, backgroundsByPage[currentPageKey])
     }
@@ -1692,7 +1732,7 @@ function App() {
             const bounds = getItemBounds(item)
             return <text x={bounds.left + bounds.width / 2} y={bounds.top + bounds.height / 2} textAnchor="middle" dominantBaseline="central" fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
         }
-        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
+        if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className={`board-sticky${item.id.startsWith(DECK_ITEM_PREFIX) ? ' deck-sticky' : ''}`} style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
@@ -1902,12 +1942,13 @@ function App() {
                                     </button>
                                 })}</div>}
                             </div>}
-                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => setShowBlend(!showBlend)}><AudioLines size={16} /> Blending board</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
+                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
+                            {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
+            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                             {renderSelectedItemToolbar()}
                             {renderToolColorToolbar()}

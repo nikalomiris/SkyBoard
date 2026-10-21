@@ -15,10 +15,10 @@ const penColors = [
 const PEN_WIDTH = 4
 
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
-const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
-const gluedSoundTiles = ['ing', 'ang', 'ong', 'ung', 'ink', 'ank', 'onk', 'unk']
-const syllableLabels = ['closed', 'open', 'magic e', 'vowel teams', 'r-controlled', 'consonant LE']
+export const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
+export const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
+export const gluedSoundTiles = ['ing', 'ang', 'ong', 'ung', 'ink', 'ank', 'onk', 'unk']
+export const syllableLabels = ['closed', 'open', 'magic e', 'vowel teams', 'r-controlled', 'consonant LE']
 const syllableLabelSet = new Set(syllableLabels)
 const syllableLabelSizes: Record<string, { width: number; height: number }> = {
     closed: { width: 92, height: 38 },
@@ -28,17 +28,17 @@ const syllableLabelSizes: Record<string, { width: number; height: number }> = {
     'r-controlled': { width: 140, height: 38 },
     'consonant LE': { width: 148, height: 38 },
 }
-const advancedVowelGroups = [
+export const advancedVowelGroups = [
     ['ee', 'ea', 'ai', 'ay', 'oa', 'ow', 'oe', 'oo', 'ie', 'igh', 'ou', 'oi', 'oy', 'au', 'aw', 'ue', 'eu'],
     ['ar', 'or', 'er', 'ir', 'ur', 'for', 'air', 'ear', 'oar', 'ore', 'our', 'oor'],
 ]
-const affixRootGroups = [
+export const affixRootGroups = [
     { kind: 'prefix', tiles: ['re', 'de', 'pre', 'pro', 'un', 'in', 'mis', 'dis', 'con', 'sub', 'non', 'mid', 'trans', 'inter', 'anti'] },
     { kind: 'root', tiles: ['ject', 'tract', 'rupt', 'struct', 'sist', 'gress', 'sect', 'port', 'form', 'tort', 'cur', 'fer', 'mote', 'spect', 'vis', 'vid'] },
     { kind: 'suffix', tiles: ['s', 'es', 'ing', 'ed', 'er', 'est', 'ful', 'less', 'able', 'ible', 'ish', 'ive', 'ly', 'en', 'ness', 'ment', 'al'] },
     { kind: 'suffix', tiles: ['(t)ion', '(s)ion', '(c)ian', '(t)ious', '(c)ious', '(x)ious', '(t)ient', '(c)ient', '(t)iate', '(c)iate', 'ture'] },
 ] as const
-const initialFinalBlendRows = [
+export const initialFinalBlendRows = [
     ['bl', 'cl', 'fl', 'gl', 'pl', 'sl', 'spl'],
     ['br', 'cr', 'dr', 'fr', 'gr', 'pr', 'tr', 'scr'],
     ['sk', 'sn', 'sm', 'sp', 'sw', 'tw', 'str'],
