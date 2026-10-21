@@ -109,30 +109,27 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
         <header className="deck-header">
             <strong>Card Deck</strong>
             <span>{ready ? 'Lesson ready' : 'Preparing the deck'}</span>
-            <button className="icon-button" title="Close card deck" aria-label="Close card deck" onClick={onClose}><X size={18} /></button>
+            <button className="deck-close" title="Close" aria-label="Close card deck" onClick={onClose}><X size={16} /></button>
         </header>
         {ready ? <div className="deck-session">
-            <aside className="deck-tiles" aria-label="Selected tiles">
-                <div className="deck-tile-list">
-                    {(config?.tiles ?? []).map((item) => <span key={deckTileKey(item)} className={`deck-chip ${deckTileClass(item)}${shownKeys.has(deckTileKey(item)) ? ' shown' : ''}`}>{item.text}</span>)}
-                </div>
-                <button className="deck-unlock" title="Unlock the deck to change the selected tiles" onClick={() => { onSessionChange?.(emptyDeckSession); onConfigChange?.({ tiles: config?.tiles ?? [], ready: false }) }}><Unlock size={14} /> Unlock to edit</button>
-            </aside>
-            <section className="deck-canvas" aria-label="Card canvas">
-                <div className="deck-stage">{stage}</div>
-                <div className="deck-controls">
-                    <button disabled={!canGoBack} onClick={() => onSessionChange?.({ ...session, index: session.index - 1 })}><ChevronLeft size={17} /> Previous</button>
-                    <button className="primary" onClick={start} disabled={!config?.tiles.length}><Play size={15} /> {session.index >= 0 ? 'Restart' : 'Start'}</button>
-                    <button disabled={!canGoNext} onClick={() => onSessionChange?.({ ...session, index: session.index + 1 })}>Next <ChevronRight size={17} /></button>
-                </div>
-                {session.index >= 0 && <span className="deck-progress" role="status">Card {session.index + 1} of {session.order.length}</span>}
-            </section>
-        </div> : <div className="deck-prep">
-            <div className="deck-prep-bar">
-                <span role="status">{draft.length} tile{draft.length === 1 ? '' : 's'} selected</span>
-                <button onClick={() => updateDraft([])} disabled={!draft.length}>Clear</button>
-                <button className="primary" disabled={!draft.length} onClick={() => onConfigChange?.({ tiles: draft, ready: true })}><Lock size={14} /> Confirm deck ready</button>
+            <div className="deck-split">
+                <aside className="deck-tiles" aria-label="Selected tiles">
+                    <div className="deck-tile-list">
+                        {(config?.tiles ?? []).map((item) => <span key={deckTileKey(item)} className={`deck-chip ${deckTileClass(item)}${shownKeys.has(deckTileKey(item)) ? ' shown' : ''}`}>{item.text}</span>)}
+                    </div>
+                </aside>
+                <section className="deck-canvas" aria-label="Card canvas">
+                    <div className="deck-stage">{stage}</div>
+                </section>
             </div>
+            <div className="deck-bar">
+                <span className="deck-bar-note"><button className="deck-unlock" title="Unlock the deck to change the selected tiles" onClick={() => { onSessionChange?.(emptyDeckSession); onConfigChange?.({ tiles: config?.tiles ?? [], ready: false }) }}><Unlock size={14} /> Unlock to edit</button></span>
+                <button disabled={!canGoBack} onClick={() => onSessionChange?.({ ...session, index: session.index - 1 })}><ChevronLeft size={17} /> Previous</button>
+                <button className="primary" onClick={start} disabled={!config?.tiles.length}><Play size={15} /> {session.index >= 0 ? 'Restart' : 'Start'}</button>
+                <button disabled={!canGoNext} onClick={() => onSessionChange?.({ ...session, index: session.index + 1 })}>Next <ChevronRight size={17} /></button>
+                <span className="deck-bar-note deck-bar-end" role="status">{session.index >= 0 ? `Card ${session.index + 1} of ${session.order.length}` : ''}</span>
+            </div>
+        </div> : <div className="deck-prep">
             <div className="deck-prep-groups">
                 {catalog.map((group) => <section key={group.label} className="deck-prep-group" aria-label={group.label}>
                     <h3>{group.label}</h3>
@@ -140,6 +137,11 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
                         {group.tiles.map((item) => <button key={deckTileKey(item)} className={`deck-chip ${deckTileClass(item)}${selectedKeys.has(deckTileKey(item)) ? ' selected' : ''}`} aria-pressed={selectedKeys.has(deckTileKey(item))} onClick={() => toggle(item)}>{item.text}</button>)}
                     </div>
                 </section>)}
+            </div>
+            <div className="deck-bar">
+                <span className="deck-bar-note" role="status">{draft.length} tile{draft.length === 1 ? '' : 's'} selected</span>
+                <button onClick={() => updateDraft([])} disabled={!draft.length}>Clear</button>
+                <button className="primary" disabled={!draft.length} onClick={() => onConfigChange?.({ tiles: draft, ready: true })}><Lock size={14} /> Confirm deck ready</button>
             </div>
         </div>}
     </div>
