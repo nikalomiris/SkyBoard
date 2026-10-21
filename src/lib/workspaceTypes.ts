@@ -4,7 +4,7 @@ export type BoardItem = { id: string; scale?: number } & (
     | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
     | { type: 'text'; left: number; top: number; text: string; color: string; size: number; fontFamily?: string }
     | { type: 'note'; left: number; top: number; text: string; color?: string; fontSize?: number; fontFamily?: string }
-    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'line'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean; rotation?: number }
+    | { type: 'shape'; left: number; top: number; shape: 'circle' | 'rectangle' | 'square' | 'triangle' | 'line' | 'arrow'; color: string; endX?: number; endY?: number; startArrow?: boolean; endArrow?: boolean; rotation?: number }
     | { type: 'grid'; left: number; top: number; values: string[]; rows?: number; cols?: number; fontSize?: number; fontFamily?: string; color?: string; cellStyles?: GridCellStyle[] }
     | { type: 'image'; left: number; top: number; src: string; label: string; storagePath?: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string; storagePath?: string }

@@ -3,8 +3,8 @@ import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactP
 import type { Session } from '@supabase/supabase-js'
 import {
     ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronRight,
-    Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
-    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight,
+    ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
+    Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
@@ -94,7 +94,7 @@ function App() {
     })
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
     const [activeTool, setActiveTool] = useState<Tool>(() => new URLSearchParams(window.location.search).get('view') === 'student' ? 'pen' : 'select')
-    const [selectedShape, setSelectedShape] = useState<'circle' | 'rectangle' | 'line'>('circle')
+    const [selectedShape, setSelectedShape] = useState<'circle' | 'square' | 'triangle' | 'line' | 'arrow'>('circle')
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
     const [ink, setInk] = useState(palette[0])
@@ -1285,7 +1285,11 @@ function App() {
     function setSelectedTextColor(color: string) {
         if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid')) return
         if (selectedItem.type === 'grid') {
-            updateSelectedGridCellStyle((style) => ({ ...style, color }))
+            if (activeGridCell?.itemId === selectedItem.id) {
+                updateSelectedGridCellStyle((style) => ({ ...style, color }))
+            } else {
+                updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'grid' ? { ...item, color } : item))
+            }
             return
         }
         updateCurrentItems((items) => items.map((item) => {
@@ -1371,11 +1375,13 @@ function App() {
                 const itemY = item.top * 6.2
                 if (item.type === 'shape') {
                     if (item.shape === 'circle') return Math.hypot(itemX - stageX, itemY - stageY) < 53
-                    if (item.shape === 'line') {
+                    if (item.shape === 'line' || item.shape === 'arrow') {
                         const { start, end } = getLineEndpoints(item)
                         return pointToSegmentDistance([stageX, stageY], start, end) < 14
                     }
-                    return stageX >= itemX - 12 && stageX <= itemX + 137 && stageY >= itemY - 12 && stageY <= itemY + 90
+                    const width = item.shape === 'square' ? 92 : 125
+                    const height = item.shape === 'square' ? 92 : 78
+                    return stageX >= itemX - 12 && stageX <= itemX + width + 12 && stageY >= itemY - 12 && stageY <= itemY + height + 12
                 }
                 const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : 230
                 const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : 180
@@ -1385,11 +1391,11 @@ function App() {
             return
         }
         if (activeTool === 'grid') {
-            addBoardItem({ id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill(''), color: ink })
+            addBoardItem({ id: id(), type: 'grid', left: stageX / 10, top: stageY / 6.2, values: Array(9).fill(''), color: '#000000' })
             return
         }
         if (activeTool === 'shape') {
-            if (selectedShape === 'line') {
+            if (selectedShape === 'line' || selectedShape === 'arrow') {
                 setSelectedItemId(null)
                 setLineDraft({ start: [stageX, stageY], end: [stageX, stageY] })
                 stageRef.current.setPointerCapture(event.pointerId)
@@ -1464,8 +1470,9 @@ function App() {
                     top: lineDraft.start[1] / 6.2,
                     endX: stageX / 10,
                     endY: stageY / 6.2,
-                    shape: 'line',
+                    shape: selectedShape,
                     color: ink,
+                    ...(selectedShape === 'arrow' ? { endArrow: true } : {}),
                 })
             }
             setLineDraft(null)
@@ -1591,36 +1598,68 @@ function App() {
         if (!selectedItem) return null
         let colorControls: ReactNode = null
         if (selectedItem.type === 'text') colorControls = renderColorPicker('Text', selectedItem.color, setSelectedTextColor)
-        else if (selectedItem.type === 'grid' && activeGridCell?.itemId === selectedItem.id) {
-            colorControls = renderColorPicker('Cell text', selectedGridCellStyle?.color ?? selectedItem.color ?? '#405f51', setSelectedTextColor)
+        else if (selectedItem.type === 'grid') {
+            const hasActiveCell = activeGridCell?.itemId === selectedItem.id
+            colorControls = renderColorPicker(hasActiveCell ? 'Cell text' : 'Grid text', hasActiveCell ? selectedGridCellStyle?.color ?? selectedItem.color ?? '#000000' : selectedItem.color ?? '#000000', setSelectedTextColor)
         } else if (selectedItem.type === 'note') {
             colorControls = renderColorPicker('Note', selectedItem.color ?? notePalette[0], setSelectedItemColor, notePalette)
         } else if (selectedItem.type === 'stroke' || selectedItem.type === 'shape') {
             colorControls = renderColorPicker('Selected item', selectedItem.color ?? '#253c37', setSelectedItemColor)
         }
 
-        return <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+        const isGrid = selectedItem.type === 'grid'
+        return <div className={`selection-toolbar selected-element-toolbar${isGrid ? ' grid-selection-toolbar' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
             <span>Selected element</span>
             {colorControls}
             {selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}
-            {selectedItem.type === 'text' && <><button title="Decrease font size" aria-label="Decrease font size" onClick={() => adjustSelectedTextSize(-2)}>A-</button><button title="Increase font size" aria-label="Increase font size" onClick={() => adjustSelectedTextSize(2)}>A+</button></>}
-            {selectedItem.type === 'grid' && <><span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span><button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button><button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button><button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button><button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button></>}
-            <button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button>
-            <button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button>
+            {selectedItem.type === 'grid' && <>
+                <span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span>
+                <div className="grid-size-row">
+                    <button title="Remove a column" aria-label="Remove a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) - 1)}>Cols-</button>
+                    <button title="Add a column" aria-label="Add a column" onClick={() => resizeGrid(selectedItem.id, selectedItem.rows ?? 3, (selectedItem.cols ?? 3) + 1)}>Cols+</button>
+                </div>
+                <div className="grid-size-row">
+                    <button title="Remove a row" aria-label="Remove a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) - 1, selectedItem.cols ?? 3)}>Rows-</button>
+                    <button title="Add a row" aria-label="Add a row" onClick={() => resizeGrid(selectedItem.id, (selectedItem.rows ?? 3) + 1, selectedItem.cols ?? 3)}>Rows+</button>
+                </div>
+            </>}
+            {!isGrid && <>
+                <button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button>
+                <button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button>
+            </>}
             <button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button>
         </div>
     }
 
     function renderToolColorToolbar(): ReactNode {
-        if (selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text', 'grid'].includes(activeTool)) return null
-        const toolLabel = activeTool === 'shape' ? 'New shape' : activeTool === 'text' ? 'New text' : activeTool === 'grid' ? 'New grid' : 'Ink'
-        return <div className="selection-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+        if (selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text'].includes(activeTool)) return null
+        const toolLabel = activeTool === 'shape' ? 'New shape' : activeTool === 'text' ? 'New text' : 'Ink'
+        if (activeTool === 'shape' && showToolOptions) {
+            const shapes = [
+                { id: 'circle', label: 'Circle', icon: Circle },
+                { id: 'square', label: 'Square', icon: Square },
+                { id: 'triangle', label: 'Triangle', icon: Triangle },
+                { id: 'line', label: 'Line', icon: Minus },
+                { id: 'arrow', label: 'Arrow', icon: ArrowRight },
+            ] as const
+            return <div className="selection-toolbar shape-tool-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                <span>New shape</span>
+                <div className="shape-tool-columns">
+                    <div className="shape-tool-column">
+                        <span>Shape</span>
+                        <div className="shape-tool-shapes" aria-label="Choose a shape">
+                            {shapes.map(({ id: shape, label, icon: Icon }) => <button key={shape} className={selectedShape === shape ? 'active' : ''} aria-label={`${label} shape`} title={label} aria-pressed={selectedShape === shape} onClick={() => setSelectedShape(shape)}><Icon size={16} /></button>)}
+                        </div>
+                    </div>
+                    <div className="shape-tool-column">
+                        <span>Color</span>
+                        {renderColorPicker('Ink', ink, setInk)}
+                    </div>
+                </div>
+            </div>
+        }
+        return <div className="selection-toolbar color-only-toolbar" onPointerDown={(event) => event.stopPropagation()}>
             <span>{toolLabel}</span>
-            {activeTool === 'shape' && showToolOptions && <>
-                <button className={selectedShape === 'circle' ? 'active' : ''} aria-label="Circle shape" title="Circle" aria-pressed={selectedShape === 'circle'} onClick={() => setSelectedShape('circle')}><Circle size={15} /></button>
-                <button className={selectedShape === 'rectangle' ? 'active' : ''} aria-label="Rectangle shape" title="Rectangle" aria-pressed={selectedShape === 'rectangle'} onClick={() => setSelectedShape('rectangle')}><Shapes size={15} /></button>
-                <button className={selectedShape === 'line' ? 'active' : ''} aria-label="Line shape" title="Line" aria-pressed={selectedShape === 'line'} onClick={() => setSelectedShape('line')}><MoveRight size={15} /></button>
-            </>}
             {renderColorPicker('Ink', ink, setInk)}
         </div>
     }
@@ -1628,20 +1667,25 @@ function App() {
     function renderBoardItem(item: BoardItem): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
-        if (item.type === 'text') return <text x={item.left * 10} y={item.top * 6.2} fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
+        if (item.type === 'text') {
+            const bounds = getItemBounds(item)
+            return <text x={bounds.left + bounds.width / 2} y={bounds.top + bounds.height / 2} textAnchor="middle" dominantBaseline="central" fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
+        }
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className="board-sticky" style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
             if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
             if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
+            if (item.shape === 'square') return <rect x={item.left * 10} y={item.top * 6.2} width={92 * scale} height={92 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 46 * scale} ${item.top * 6.2 + 46 * scale})`} />
+            if (item.shape === 'triangle') return <polygon points={`${item.left * 10 + 62.5 * scale},${item.top * 6.2} ${item.left * 10 + 125 * scale},${item.top * 6.2 + 78 * scale} ${item.left * 10},${item.top * 6.2 + 78 * scale}`} fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
             const { start, end } = getLineEndpoints(item)
             const startMarkerId = `line-start-${item.id}`
             const endMarkerId = `line-end-${item.id}`
             return <g>
                 <defs>
                     {item.startArrow && <marker id={startMarkerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={10 * scale} markerHeight={10 * scale} markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={item.color} /></marker>}
-                    {item.endArrow && <marker id={endMarkerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={10 * scale} markerHeight={10 * scale} markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill={item.color} /></marker>}
+                    {(item.endArrow || item.shape === 'arrow') && <marker id={endMarkerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth={10 * scale} markerHeight={10 * scale} markerUnits="userSpaceOnUse" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill={item.color} /></marker>}
                 </defs>
-                <line x1={start[0]} y1={start[1]} x2={end[0]} y2={end[1]} stroke={item.color} strokeWidth="4" markerStart={item.startArrow ? `url(#${startMarkerId})` : undefined} markerEnd={item.endArrow ? `url(#${endMarkerId})` : undefined} />
+                <line x1={start[0]} y1={start[1]} x2={end[0]} y2={end[1]} stroke={item.color} strokeWidth="4" markerStart={item.startArrow ? `url(#${startMarkerId})` : undefined} markerEnd={item.endArrow || item.shape === 'arrow' ? `url(#${endMarkerId})` : undefined} />
             </g>
         }
         if (item.type === 'grid') {

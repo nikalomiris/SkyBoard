@@ -88,7 +88,7 @@ export function getItemBounds(item: BoardItem): ItemBounds {
     const left = item.left * 10
     const top = item.top * 6.2
     if (item.type === 'shape' && item.shape === 'circle') return { left: left - 46 * scale, top: top - 46 * scale, width: 92 * scale, height: 92 * scale }
-    if (item.type === 'shape' && item.shape === 'line') {
+    if (item.type === 'shape' && (item.shape === 'line' || item.shape === 'arrow')) {
         const { start, end } = getLineEndpoints(item)
         const margin = 5 * scale
         const boundsLeft = Math.min(start[0], end[0]) - margin
@@ -96,8 +96,8 @@ export function getItemBounds(item: BoardItem): ItemBounds {
         return { left: boundsLeft, top: boundsTop, width: Math.max(1, Math.abs(end[0] - start[0]) + margin * 2), height: Math.max(1, Math.abs(end[1] - start[1]) + margin * 2) }
     }
     if (item.type === 'shape') {
-        const width = 125 * scale
-        const height = 78 * scale
+        const width = (item.shape === 'square' ? 92 : 125) * scale
+        const height = (item.shape === 'square' ? 92 : 78) * scale
         const center: Point = [left + width / 2, top + height / 2]
         const corners: Point[] = [[left, top], [left + width, top], [left + width, top + height], [left, top + height]]
         return boundsForPoints(corners.map((point) => rotatePoint(point, center, item.rotation ?? 0)))
@@ -110,7 +110,7 @@ export function getItemBounds(item: BoardItem): ItemBounds {
 
 export function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): BoardItem {
     if (item.type === 'stroke') return { ...item, points: parsePoints(item.points).map(([pointX, pointY]) => `${pointX + deltaX},${pointY + deltaY}`).join(' ') }
-    if (item.type === 'shape' && item.shape === 'line' && item.endX !== undefined && item.endY !== undefined) {
+    if (item.type === 'shape' && (item.shape === 'line' || item.shape === 'arrow') && item.endX !== undefined && item.endY !== undefined) {
         return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2, endX: item.endX + deltaX / 10, endY: item.endY + deltaY / 6.2 }
     }
     return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2 }
