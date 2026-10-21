@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
-import type { BlendTile } from './components/BlendingBoard'
+import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
@@ -108,12 +108,15 @@ function App() {
     const [pageRenameValue, setPageRenameValue] = useState('')
     const [showBlend, setShowBlend] = useState(false)
     const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
+    const [blendStrokes, setBlendStrokes] = useState<BlendStroke[]>([])
+    const [remoteBlendDraft, setRemoteBlendDraft] = useState<BlendDraft | null>(null)
 
     // The blending board is a scratch space: reset it whenever a lesson is opened, switched or closed.
     const [blendColor, setBlendColor] = useState<string | null>(null)
     useEffect(() => {
         if (studentView) return
         setBlendTiles([])
+        setBlendStrokes([])
         setShowBlend(false)
     }, [openLesson?.id])
     const [showShare, setShowShare] = useState(false)
@@ -319,13 +322,14 @@ function App() {
     type LiveDraft = { kind: 'ink' | 'eraser' | 'laser'; pageIndex: number; points: string; color: string; width: number; opacity: number }
     const [remoteDraft, setRemoteDraft] = useState<LiveDraft | null>(null)
     const handleRemoteDraft = ({ payload }: { payload: unknown }) => {
-        const draft = payload as LiveDraft | null
+        const draft = payload as (LiveDraft & { blend?: boolean }) | null
+        if (draft?.blend) { setRemoteBlendDraft(draft.kind === 'ink' && draft.points ? { ...draft, kind: 'ink' } : null); return }
         setRemoteDraft(draft && draft.points && draft.pageIndex === liveStateRef.current.pageIndex ? draft : null)
     }
     const openLessonIdRef = useRef<string | null>(null)
     openLessonIdRef.current = openLesson?.id ?? null
-    const blendStateRef = useRef({ open: showBlend, tiles: blendTiles, color: blendColor })
-    blendStateRef.current = { open: showBlend, tiles: blendTiles, color: blendColor }
+    const blendStateRef = useRef({ open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor })
+    blendStateRef.current = { open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
     const lockedInviteIdsRef = useRef(lockedInviteIds)
@@ -406,7 +410,7 @@ function App() {
     useEffect(() => {
         if (!shareSessionId || studentView) return
         broadcastBlendState()
-    }, [shareSessionId, studentView, showBlend, blendTiles, blendColor])
+    }, [shareSessionId, studentView, showBlend, blendTiles, blendStrokes, blendColor])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -485,9 +489,11 @@ function App() {
         })
         channel.on('broadcast', { event: 'blend' }, ({ payload }) => {
             if (!admitted()) return
-            const blend = payload as { open: boolean; tiles: BlendTile[]; color: string | null }
+            const blend = payload as { open: boolean; tiles: BlendTile[]; strokes?: BlendStroke[]; color: string | null }
             if (!blend || !Array.isArray(blend.tiles)) return
             setBlendTiles(blend.tiles)
+            setBlendStrokes(Array.isArray(blend.strokes) ? blend.strokes : [])
+            setRemoteBlendDraft(null)
             setBlendColor(blend.color ?? null)
             setShowBlend(Boolean(blend.open))
         })
@@ -1901,7 +1907,7 @@ function App() {
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
-                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
+                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                             {renderSelectedItemToolbar()}
                             {renderToolColorToolbar()}

@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
-import { Check, Trash2, X } from 'lucide-react'
+import { Check, Hand, Pen, Trash2, X } from 'lucide-react'
 
 export type BlendTile = { id: string; text: string; x: number; y: number; kind?: string }
+
+export type BlendStroke = { id: string; points: string; color: string; width: number; opacity: number }
+export type BlendDraft = { kind: 'ink'; points: string; color: string; width: number; opacity: number }
+const penColors = [
+    { name: 'Black', color: '#111111' },
+    { name: 'White', color: '#ffffff' },
+    { name: 'Red', color: '#e03131' },
+    { name: 'Green', color: '#2f9e44' },
+]
+const PEN_WIDTH = 4
 
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
@@ -60,9 +70,13 @@ function tileSize(text: string) {
     return syllableLabelSizes[text] ?? { width: TILE_W, height: TILE_H }
 }
 
-export default function BlendingBoard({ tiles, setTiles, onClose, readOnly = false, color, onColorChange }: {
+export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, onDraft, remoteDraft, onClose, readOnly = false, color, onColorChange }: {
     tiles: BlendTile[]
     setTiles: Dispatch<SetStateAction<BlendTile[]>>
+    strokes: BlendStroke[]
+    setStrokes: Dispatch<SetStateAction<BlendStroke[]>>
+    onDraft?: (draft: BlendDraft | null) => void
+    remoteDraft?: BlendDraft | null
     onClose: () => void
     readOnly?: boolean
     color?: string | null
@@ -81,6 +95,44 @@ export default function BlendingBoard({ tiles, setTiles, onClose, readOnly = fal
     tilesRef.current = tiles
     const accentColor = readOnly && color ? color : boardColor
     useEffect(() => { onColorChange?.(boardColor) }, [boardColor])
+    const [draftPoints, setDraftPoints] = useState('')
+    const draftPointsRef = useRef('')
+    const lastDraftSentRef = useRef(0)
+    const [mode, setMode] = useState<'hand' | 'pen'>('hand')
+    const [penColor, setPenColor] = useState(penColors[0].color)
+    const drawTool = !readOnly && mode === 'pen' ? 'pen' : null
+    const ink = penColor
+    const penStyle = { width: PEN_WIDTH, opacity: 1 }
+
+    function canvasPoint(event: ReactPointerEvent<Element>) {
+        const rect = canvasRef.current!.getBoundingClientRect()
+        return `${((event.clientX - rect.left) / rect.width) * 1000},${((event.clientY - rect.top) / rect.height) * 620}`
+    }
+    function updateDraft(points: string) {
+        draftPointsRef.current = points
+        setDraftPoints(points)
+        if (!points) { lastDraftSentRef.current = 0; onDraft?.(null); return }
+        if (Date.now() - lastDraftSentRef.current >= 40) {
+            lastDraftSentRef.current = Date.now()
+            onDraft?.({ kind: 'ink', points, color: ink, ...penStyle })
+        }
+    }
+    function onDrawDown(event: ReactPointerEvent<SVGSVGElement>) {
+        if (!drawTool || !canvasRef.current) return
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        updateDraft(canvasPoint(event))
+    }
+    function onDrawMove(event: ReactPointerEvent<SVGSVGElement>) {
+        if (!draftPointsRef.current || !canvasRef.current) return
+        updateDraft(`${draftPointsRef.current} ${canvasPoint(event)}`)
+    }
+    function onDrawUp() {
+        const points = draftPointsRef.current
+        if (!points || !drawTool) return
+        setStrokes((previous) => [...previous, { id: `bs-${Date.now()}-${nextId.current++}`, points, color: ink, ...penStyle }])
+        updateDraft('')
+    }
 
     function startDrag(event: ReactPointerEvent<HTMLElement>, text: string, tileId: string | null, kind?: string) {
         event.preventDefault()
@@ -144,7 +196,7 @@ export default function BlendingBoard({ tiles, setTiles, onClose, readOnly = fal
         }
     }
 
-    return <div className={`blending-board${readOnly ? ' read-only' : ''}`} style={{ ['--board-accent' as string]: accentColor }}>
+    return <div className={`blending-board${readOnly ? ' read-only' : ''}${drawTool ? ' drawing-mode' : ''}`} style={{ ['--board-accent' as string]: accentColor }}>
         {!readOnly && <div className="blending-tabs">
             {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} disabled={tab !== 'Basic Tiles' && tab !== 'Glued Sounds' && tab !== 'Advanced Vowels' && tab !== 'Prefixes, Roots & Suffixes' && tab !== 'Capital Letters' && tab !== 'Syllable Labels'} onClick={() => setActiveTab(tab)}>{tab}</button>)}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
@@ -204,11 +256,25 @@ export default function BlendingBoard({ tiles, setTiles, onClose, readOnly = fal
                 const size = tileSize(tile.text)
                 return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${tile.kind ? `affix-${tile.kind}` : ''} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title={readOnly ? undefined : 'Double-click to delete'} onPointerDown={readOnly ? undefined : (event) => startDrag(event, tile.text, tile.id, tile.kind)} onDoubleClick={readOnly ? undefined : () => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
             })}
+            <svg className="blending-ink-layer" data-tool={drawTool ?? undefined} viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Blending board annotations" onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} onPointerCancel={onDrawUp}>
+                {strokes.map((stroke) => <polyline key={stroke.id} points={stroke.points} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeOpacity={stroke.opacity} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />)}
+                {[drawTool && draftPoints ? { points: draftPoints, color: ink, ...penStyle } : null, remoteDraft ?? null].map((draft, index) => {
+                    if (!draft) return null
+                    return <polyline key={index} points={draft.points} fill="none" stroke={draft.color} strokeWidth={draft.width} strokeOpacity={draft.opacity} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                })}
+            </svg>
             {!readOnly && tiles.length === 0 && activeTab !== 'Syllable Labels' && <span className="blending-hint">Drag tiles here to build words</span>}
         </div>
         {!readOnly && <div className="blending-footer">
-            <button onClick={() => setTiles([])} disabled={tiles.length === 0}><Trash2 size={15} /> Clear board</button>
-            <span>Drag a tile off the board to remove it</span>
+            <div className="blend-mode-tools" role="radiogroup" aria-label="Blending board tool">
+                <button role="radio" aria-checked={mode === 'hand'} className={mode === 'hand' ? 'selected' : ''} title="Move tiles" aria-label="Move tiles" onClick={() => setMode('hand')}><Hand size={17} /></button>
+                <button role="radio" aria-checked={mode === 'pen'} className={mode === 'pen' ? 'selected' : ''} title="Pen" aria-label="Pen" onClick={() => setMode('pen')}><Pen size={17} /></button>
+                {mode === 'pen' && penColors.map((option) => <button key={option.color} role="radio" aria-checked={penColor === option.color} className={`pen-color${penColor === option.color ? ' selected' : ''}`} style={{ background: option.color }} title={`${option.name} pen`} aria-label={`${option.name} pen`} onClick={() => setPenColor(option.color)} />)}
+            </div>
+            <div className="blending-footer-center">
+                <button onClick={() => { setTiles([]); setStrokes([]) }} disabled={tiles.length === 0 && strokes.length === 0}><Trash2 size={15} /> Clear board</button>
+                <span>Drag a tile off the board to remove it</span>
+            </div>
             <div className="accent-swatches" role="radiogroup" aria-label="Canvas color">{boardColors.map((option) => <button key={option.color} role="radio" aria-checked={boardColor === option.color} className={boardColor === option.color ? 'selected' : ''} style={{ background: option.color }} title={`${option.name} canvas`} aria-label={`${option.name} canvas`} onClick={() => { setBoardColor(option.color); window.localStorage.setItem(colorStorageKey, option.color) }}>{boardColor === option.color && <Check size={14} />}</button>)}</div>
         </div>}
         {drag && drag.tileId === null && (() => {
