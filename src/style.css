@@ -5404,6 +5404,10 @@ kbd {
 }
 
 .deck-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
     min-width: 46px;
     height: 46px;
     padding: 0 8px;

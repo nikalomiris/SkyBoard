@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
-import { Check, Hand, Pen, Trash2, X } from 'lucide-react'
+import { Check, Eraser, Hand, Pen, Trash2, X } from 'lucide-react'
 
 export type BlendTile = { id: string; text: string; x: number; y: number; kind?: string }
 
@@ -9,10 +9,20 @@ export type BlendDraft = { kind: 'ink'; points: string; color: string; width: nu
 const penColors = [
     { name: 'Black', color: '#111111' },
     { name: 'White', color: '#ffffff' },
-    { name: 'Red', color: '#e03131' },
-    { name: 'Green', color: '#2f9e44' },
 ]
 const PEN_WIDTH = 4
+const ERASER_RADIUS = 14
+
+function strokeHit(points: string, x: number, y: number) {
+    const coords = points.split(' ').map((pair) => pair.split(',').map(Number))
+    if (coords.length === 1) return Math.hypot(coords[0][0] - x, coords[0][1] - y) <= ERASER_RADIUS
+    return coords.slice(1).some(([bx, by], index) => {
+        const [ax, ay] = coords[index]
+        const lengthSquared = (bx - ax) ** 2 + (by - ay) ** 2
+        const t = lengthSquared === 0 ? 0 : clamp(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / lengthSquared, 0, 1)
+        return Math.hypot(ax + t * (bx - ax) - x, ay + t * (by - ay) - y) <= ERASER_RADIUS
+    })
+}
 
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 export const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
@@ -66,8 +76,19 @@ function tileClass(text: string) {
     return vowels.has(text) ? 'vowel' : 'consonant'
 }
 
+const CANVAS_FONT_SIZE = 50
+const TILE_PADDING = 24
+let measureContext: CanvasRenderingContext2D | null | undefined
+
+function textWidth(text: string) {
+    if (measureContext === undefined) measureContext = document.createElement('canvas').getContext('2d')
+    if (!measureContext) return text.length * CANVAS_FONT_SIZE * 0.6
+    measureContext.font = `600 ${CANVAS_FONT_SIZE}px Questrial, sans-serif`
+    return measureContext.measureText(text).width
+}
+
 function tileSize(text: string) {
-    return syllableLabelSizes[text] ?? { width: TILE_W, height: TILE_H }
+    return syllableLabelSizes[text] ?? { width: Math.max(TILE_W, Math.ceil(textWidth(text) + TILE_PADDING)), height: TILE_H }
 }
 
 export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, onDraft, remoteDraft, onClose, readOnly = false, color, onColorChange }: {
@@ -98,15 +119,15 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
     const [draftPoints, setDraftPoints] = useState('')
     const draftPointsRef = useRef('')
     const lastDraftSentRef = useRef(0)
-    const [mode, setMode] = useState<'hand' | 'pen'>('hand')
+    const [mode, setMode] = useState<'hand' | 'pen' | 'eraser'>('hand')
     const [penColor, setPenColor] = useState(penColors[0].color)
-    const drawTool = !readOnly && mode === 'pen' ? 'pen' : null
+    const drawTool = !readOnly && mode !== 'hand' ? mode : null
     const ink = penColor
     const penStyle = { width: PEN_WIDTH, opacity: 1 }
 
     function canvasPoint(event: ReactPointerEvent<Element>) {
         const rect = canvasRef.current!.getBoundingClientRect()
-        return `${((event.clientX - rect.left) / rect.width) * 1000},${((event.clientY - rect.top) / rect.height) * 620}`
+        return `${Math.round((event.clientX - rect.left) * 10) / 10},${Math.round((event.clientY - rect.top) * 10) / 10}`
     }
     function updateDraft(points: string) {
         draftPointsRef.current = points
@@ -117,17 +138,29 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
             onDraft?.({ kind: 'ink', points, color: ink, ...penStyle })
         }
     }
+    const erasingRef = useRef(false)
+    function eraseAt(event: ReactPointerEvent<Element>) {
+        const [x, y] = canvasPoint(event).split(',').map(Number)
+        setStrokes((previous) => {
+            const kept = previous.filter((stroke) => !strokeHit(stroke.points, x, y))
+            return kept.length === previous.length ? previous : kept
+        })
+    }
     function onDrawDown(event: ReactPointerEvent<SVGSVGElement>) {
         if (!drawTool || !canvasRef.current) return
         event.preventDefault()
         event.currentTarget.setPointerCapture(event.pointerId)
+        if (drawTool === 'eraser') { erasingRef.current = true; eraseAt(event); return }
         updateDraft(canvasPoint(event))
     }
     function onDrawMove(event: ReactPointerEvent<SVGSVGElement>) {
+        if (erasingRef.current) { eraseAt(event); return }
         if (!draftPointsRef.current || !canvasRef.current) return
         updateDraft(`${draftPointsRef.current} ${canvasPoint(event)}`)
     }
     function onDrawUp() {
+        erasingRef.current = false
+        if (drawTool !== 'pen') return
         const points = draftPointsRef.current
         if (!points || !drawTool) return
         setStrokes((previous) => [...previous, { id: `bs-${Date.now()}-${nextId.current++}`, points, color: ink, ...penStyle }])
@@ -256,7 +289,7 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
                 const size = tileSize(tile.text)
                 return <div key={tile.id} className={`canvas-tile ${tileClass(tile.text)} ${tile.kind ? `affix-${tile.kind}` : ''} ${syllableLabelSet.has(tile.text) ? 'canvas-syllable-label' : ''} ${drag?.tileId === tile.id ? 'dragging' : ''}`} style={{ left: tile.x, top: tile.y, width: size.width, height: size.height }} title={readOnly ? undefined : 'Double-click to delete'} onPointerDown={readOnly ? undefined : (event) => startDrag(event, tile.text, tile.id, tile.kind)} onDoubleClick={readOnly ? undefined : () => setTiles((previous) => previous.filter((item) => item.id !== tile.id))}>{tile.text}</div>
             })}
-            <svg className="blending-ink-layer" data-tool={drawTool ?? undefined} viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Blending board annotations" onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} onPointerCancel={onDrawUp}>
+            <svg className="blending-ink-layer" data-tool={drawTool ?? undefined} aria-label="Blending board annotations" onPointerDown={onDrawDown} onPointerMove={onDrawMove} onPointerUp={onDrawUp} onPointerCancel={onDrawUp}>
                 {strokes.map((stroke) => <polyline key={stroke.id} points={stroke.points} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeOpacity={stroke.opacity} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />)}
                 {[drawTool && draftPoints ? { points: draftPoints, color: ink, ...penStyle } : null, remoteDraft ?? null].map((draft, index) => {
                     if (!draft) return null
@@ -269,9 +302,11 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
             <div className="blend-mode-tools" role="radiogroup" aria-label="Blending board tool">
                 <button role="radio" aria-checked={mode === 'hand'} className={mode === 'hand' ? 'selected' : ''} title="Move tiles" aria-label="Move tiles" onClick={() => setMode('hand')}><Hand size={17} /></button>
                 <button role="radio" aria-checked={mode === 'pen'} className={mode === 'pen' ? 'selected' : ''} title="Pen" aria-label="Pen" onClick={() => setMode('pen')}><Pen size={17} /></button>
+                <button role="radio" aria-checked={mode === 'eraser'} className={mode === 'eraser' ? 'selected' : ''} title="Eraser" aria-label="Eraser" onClick={() => setMode('eraser')}><Eraser size={17} /></button>
                 {mode === 'pen' && penColors.map((option) => <button key={option.color} role="radio" aria-checked={penColor === option.color} className={`pen-color${penColor === option.color ? ' selected' : ''}`} style={{ background: option.color }} title={`${option.name} pen`} aria-label={`${option.name} pen`} onClick={() => setPenColor(option.color)} />)}
             </div>
             <div className="blending-footer-center">
+                <button onClick={() => setStrokes([])} disabled={strokes.length === 0}><Eraser size={15} /> Clear pen</button>
                 <button onClick={() => { setTiles([]); setStrokes([]) }} disabled={tiles.length === 0 && strokes.length === 0}><Trash2 size={15} /> Clear board</button>
                 <span>Drag a tile off the board to remove it</span>
             </div>
