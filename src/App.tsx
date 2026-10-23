@@ -111,6 +111,8 @@ function App() {
     const [laserFading, setLaserFading] = useState(false)
     const [renamingPageIndex, setRenamingPageIndex] = useState<number | null>(null)
     const [pageRenameValue, setPageRenameValue] = useState('')
+    const [pageSelectionMode, setPageSelectionMode] = useState(false)
+    const [selectedPageIndices, setSelectedPageIndices] = useState<number[]>([])
     const [showBlend, setShowBlend] = useState(false)
     const [blendTiles, setBlendTiles] = useState<BlendTile[]>([])
     const [blendStrokes, setBlendStrokes] = useState<BlendStroke[]>([])
@@ -125,6 +127,8 @@ function App() {
         setShowBlend(false)
         setShowDeck(false)
         setDeckSession(emptyDeckSession)
+        setPageSelectionMode(false)
+        setSelectedPageIndices([])
     }, [openLesson?.id])
     // The deck selection is saved with the lesson; the session (random order and position) is transient.
     const [showDeck, setShowDeck] = useState(false)
@@ -1290,26 +1294,71 @@ function App() {
         removePageAt(pageIndex)
     }
 
+    function togglePageSelection(index: number) {
+        setSelectedPageIndices((selected) => selected.includes(index)
+            ? selected.filter((selectedIndex) => selectedIndex !== index)
+            : [...selected, index])
+    }
+
+    function startPageSelection() {
+        setRenamingPageIndex(null)
+        setSelectedPageIndices([pageIndex])
+        setPageSelectionMode(true)
+    }
+
+    function cancelPageSelection() {
+        setSelectedPageIndices([])
+        setPageSelectionMode(false)
+    }
+
+    function deleteSelectedPages() {
+        if (selectedPageIndices.length === 0 || selectedPageIndices.length >= pages.length) return
+        if (!window.confirm(`Delete ${selectedPageIndices.length} selected ${selectedPageIndices.length === 1 ? 'page' : 'pages'}? This action cannot be undone.`)) return
+        removePagesAt(selectedPageIndices)
+        cancelPageSelection()
+    }
+
     function removePageAt(removeIndex: number) {
-        if (pages.length <= 1) return
+        removePagesAt([removeIndex])
+    }
+
+    function removePagesAt(removeIndices: number[]) {
+        const removedIndices = new Set(removeIndices.filter((index) => Number.isInteger(index) && index >= 0 && index < pages.length))
+        if (removedIndices.size === 0 || pages.length - removedIndices.size < 1) return
         if (!openLesson) return
         const lessonId = openLesson.id
-        const nextPages = pages.filter((_, index) => index !== removeIndex)
-        const shiftDown = <T,>(map: Record<string, T>) => {
+        const nextPages = pages.filter((_, index) => !removedIndices.has(index))
+        const reindexPages = <T,>(map: Record<string, T>) => {
             const next = { ...map }
-            for (let i = removeIndex; i < pages.length; i++) {
-                const from = `${lessonId}:${i + 1}`
-                if (i + 1 < pages.length && from in map) next[`${lessonId}:${i}`] = map[from]
-                else delete next[`${lessonId}:${i}`]
-            }
+            const prefix = `${lessonId}:`
+            Object.keys(next).forEach((key) => {
+                if (key.startsWith(prefix)) delete next[key]
+            })
+            let nextIndex = 0
+            pages.forEach((_, oldIndex) => {
+                if (removedIndices.has(oldIndex)) return
+                const oldKey = `${lessonId}:${oldIndex}`
+                const newKey = `${lessonId}:${nextIndex}`
+                if (oldKey in map) next[newKey] = map[oldKey]
+                nextIndex += 1
+            })
             return next
         }
-        for (let i = removeIndex; i < pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
-        setItemsByPage(shiftDown)
-        setBackgroundsByPage(shiftDown)
+        const earliestRemovedIndex = Math.min(...removedIndices)
+        for (let i = earliestRemovedIndex; i < pages.length; i++) {
+            delete historyRef.current[`${lessonId}:${i}`]
+        }
+        const removedBeforeCurrent = [...removedIndices].filter((index) => index < pageIndex).length
+        const nextPageIndex = removedIndices.has(pageIndex)
+            ? Math.max(0, pageIndex - removedBeforeCurrent - 1)
+            : pageIndex - removedBeforeCurrent
+        setItemsByPage(reindexPages)
+        setBackgroundsByPage(reindexPages)
         updateLessonPages(nextPages)
-        setPageIndex(removeIndex < pageIndex ? pageIndex - 1 : removeIndex === pageIndex ? Math.max(0, pageIndex - 1) : pageIndex)
+        setPageIndex(nextPageIndex)
         setSelectedItemId(null)
+        setSelectedPageIndices([])
+        setPageSelectionMode(false)
     }
 
     function coordinates(event: { clientX: number; clientY: number }) {
@@ -2097,7 +2146,50 @@ function App() {
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            {!studentView && <div className="page-dock"><div className="page-tabs">{!studentView && pages.map((page, index) => renamingPageIndex === index ? <div key={`rename-${index}`} className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button key={`${page}-${index}`} title="Double-click to rename" onDoubleClick={() => startRenamePage(index)} className={`page-tab ${index === pageIndex ? 'active' : ''}`} draggable={!studentView} onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); if (draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }} onDragEnd={() => setDraggedPageIndex(null)} onClick={() => { setPageIndex(index); setSelectedItemId(null) }}><span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}</button>)}{!studentView && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}{studentView && <span className="page-tab active"><span className="page-number">{String(pageIndex + 1).padStart(2, '0')}</span>{pages[pageIndex]}</span>}</div><div className="page-dock-actions">{!studentView && <><button title="Rename page" aria-label="Rename page" onClick={() => startRenamePage(pageIndex)}><Pencil size={16} /></button><button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button><button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button><button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button><button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button></>}<span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span></div></div>}
+                            {!studentView && <div className="page-dock">
+                                <div className="page-tabs">
+                                    {pages.map((page, index) => renamingPageIndex === index ? <div key={`rename-${index}`} className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button
+                                        key={`${page}-${index}`}
+                                        type="button"
+                                        title={pageSelectionMode ? `${selectedPageIndices.includes(index) ? 'Deselect' : 'Select'} ${page}` : 'Double-click to rename'}
+                                        onDoubleClick={() => { if (!pageSelectionMode) startRenamePage(index) }}
+                                        className={`page-tab ${index === pageIndex ? 'active' : ''}${pageSelectionMode && selectedPageIndices.includes(index) ? ' selected-for-deletion' : ''}`}
+                                        draggable={!pageSelectionMode}
+                                        aria-current={index === pageIndex ? 'page' : undefined}
+                                        aria-pressed={pageSelectionMode ? selectedPageIndices.includes(index) : undefined}
+                                        onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }}
+                                        onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}
+                                        onDrop={(event) => { event.preventDefault(); if (!pageSelectionMode && draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }}
+                                        onDragEnd={() => setDraggedPageIndex(null)}
+                                        onClick={() => {
+                                            if (pageSelectionMode) togglePageSelection(index)
+                                            else { setPageIndex(index); setSelectedItemId(null) }
+                                        }}
+                                    >
+                                        {pageSelectionMode && <span className="page-selection-indicator" aria-hidden="true">{selectedPageIndices.includes(index) && <Check size={12} />}</span>}
+                                        <span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}
+                                    </button>)}
+                                    {!pageSelectionMode && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}
+                                </div>
+                                <div className="page-dock-actions">
+                                    {pageSelectionMode
+                                        ? <>
+                                            <span>{selectedPageIndices.length} selected</span>
+                                            <button className="page-selection-action" type="button" onClick={cancelPageSelection}>Cancel</button>
+                                            <button className="page-selection-action delete-selected-pages" type="button" onClick={deleteSelectedPages} disabled={selectedPageIndices.length === 0 || selectedPageIndices.length >= pages.length} title={selectedPageIndices.length >= pages.length ? 'At least one page must remain' : 'Delete selected pages'}><Trash2 size={15} /> Delete</button>
+                                        </>
+                                        : <>
+                                            <button title="Select pages" aria-label="Select pages" onClick={startPageSelection}><Check size={16} /></button>
+                                            <button title="Rename page" aria-label="Rename page" onClick={() => startRenamePage(pageIndex)}><Pencil size={16} /></button>
+                                            <button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button>
+                                            <button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button>
+                                            <button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button>
+                                            <button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button>
+                                        </>
+                                    }
+                                    <span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span>
+                                </div>
+                            </div>}
                         </div>
                     </main>
                 </div>
