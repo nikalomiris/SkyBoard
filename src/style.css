@@ -2007,7 +2007,7 @@ kbd {
 }
 
 .selection-toolbar.shape-tool-toolbar {
-    width: 144px;
+    width: 186px;
     grid-template-columns: 1fr;
     gap: 8px;
 }
@@ -2052,8 +2052,8 @@ kbd {
 .shape-tool-columns {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    grid-template-columns: 1fr;
+    gap: 8px;
 }
 
 .shape-tool-column {
@@ -2073,8 +2073,8 @@ kbd {
 
 .shape-tool-shapes {
     display: grid;
-    grid-template-columns: 30px;
-    gap: 5px;
+    grid-template-columns: repeat(5, 30px);
+    gap: 4px;
 }
 
 .shape-tool-toolbar .shape-tool-shapes button {
@@ -2085,8 +2085,7 @@ kbd {
 .shape-tool-toolbar .selection-text-colors {
     width: auto;
     display: grid;
-    grid-template-columns: 20px;
-    grid-template-rows: repeat(6, 20px);
+    grid-template-columns: repeat(6, 20px);
     gap: 7px;
     padding: 0;
     border: 0;
@@ -2121,6 +2120,10 @@ kbd {
     gap: 7px;
     padding: 0;
     border: 0;
+}
+
+.shape-tool-toolbar .shape-fill-controls .selection-text-colors {
+    grid-template-columns: repeat(6, 20px);
 }
 
 .selection-toolbar span {
