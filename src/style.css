@@ -1966,6 +1966,10 @@ kbd {
     pointer-events: all;
 }
 
+.selection-resize-handle-nesw {
+    cursor: nesw-resize;
+}
+
 .selection-rotate-handle {
     width: 24px;
     height: 24px;

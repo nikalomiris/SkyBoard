@@ -2,6 +2,10 @@ import type { BoardItem } from './workspaceTypes'
 
 export type Point = [number, number]
 export type ItemBounds = { left: number; top: number; width: number; height: number }
+export type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+
+const BOARD_WIDTH = 1000
+const BOARD_HEIGHT = 620
 
 export function parsePoints(points: string): Point[] {
     return points.trim().split(/\s+/).filter(Boolean).map((point) => point.split(',').map(Number) as Point)
@@ -156,12 +160,53 @@ export function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): 
     return { ...item, left: item.left + deltaX / 10, top: item.top + deltaY / 6.2 }
 }
 
-export function resizeBoardItem(item: BoardItem, factor: number): BoardItem {
-    const scale = Math.max(0.35, Math.min(3, (item.scale ?? 1) * factor))
-    if (item.type !== 'stroke') return { ...item, scale }
-    const bounds = getItemBounds(item)
-    return {
-        ...item,
-        points: parsePoints(item.points).map(([pointX, pointY]) => `${bounds.left + (pointX - bounds.left) * factor},${bounds.top + (pointY - bounds.top) * factor}`).join(' '),
+export function resizeBoardItem(item: BoardItem, factor: number, handle?: ResizeHandle): BoardItem {
+    const resizeAtFactor = (resizeFactor: number): BoardItem => {
+        const bounds = getItemBounds(item)
+        if (item.type === 'stroke') {
+            const anchorX = handle?.endsWith('left') ? bounds.left + bounds.width : bounds.left
+            const anchorY = handle?.startsWith('top') ? bounds.top + bounds.height : bounds.top
+            const scaledStroke: BoardItem = {
+                ...item,
+                points: parsePoints(item.points).map(([pointX, pointY]) => `${anchorX + (pointX - anchorX) * resizeFactor},${anchorY + (pointY - anchorY) * resizeFactor}`).join(' '),
+            }
+            if (!handle) return scaledStroke
+            const scaledBounds = getItemBounds(scaledStroke)
+            return moveBoardItem(scaledStroke, anchorX - (handle.endsWith('left') ? scaledBounds.left + scaledBounds.width : scaledBounds.left), anchorY - (handle.startsWith('top') ? scaledBounds.top + scaledBounds.height : scaledBounds.top))
+        }
+        const scale = Math.max(0.35, (item.scale ?? 1) * resizeFactor)
+        const scaledItem = { ...item, scale }
+        if (!handle) return scaledItem
+        const anchorX = handle.endsWith('left') ? bounds.left + bounds.width : bounds.left
+        const anchorY = handle.startsWith('top') ? bounds.top + bounds.height : bounds.top
+        const scaledBounds = getItemBounds(scaledItem)
+        const scaledAnchorX = handle.endsWith('left') ? scaledBounds.left + scaledBounds.width : scaledBounds.left
+        const scaledAnchorY = handle.startsWith('top') ? scaledBounds.top + scaledBounds.height : scaledBounds.top
+        return moveBoardItem(scaledItem, anchorX - scaledAnchorX, anchorY - scaledAnchorY)
     }
+
+    let boundedFactor = factor
+    if (factor > 1) {
+        const fitsBoard = (resizeFactor: number) => {
+            const bounds = getItemBounds(resizeAtFactor(resizeFactor))
+            return bounds.left >= 0 && bounds.top >= 0
+                && bounds.left + bounds.width <= BOARD_WIDTH
+                && bounds.top + bounds.height <= BOARD_HEIGHT
+        }
+        if (!fitsBoard(factor)) {
+            if (!fitsBoard(1)) {
+                boundedFactor = 1
+            } else {
+                let low = 1
+                let high = factor
+                for (let attempt = 0; attempt < 24; attempt++) {
+                    const middle = (low + high) / 2
+                    if (fitsBoard(middle)) low = middle
+                    else high = middle
+                }
+                boundedFactor = low
+            }
+        }
+    }
+    return resizeAtFactor(boundedFactor)
 }

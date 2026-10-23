@@ -28,11 +28,12 @@ import {
     textFontOptions,
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
-import type { ItemBounds, Point } from './lib/boardGeometry'
+import type { ItemBounds, Point, ResizeHandle } from './lib/boardGeometry'
 import type { BoardItem, ClipboardPage, DeckTile, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
 
 type ItemGesture =
-    | { mode: 'move' | 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
+    | { mode: 'move'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
+    | { mode: 'resize'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds; handle: ResizeHandle }
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 type DeleteConfirmation = { type: 'lesson'; lessonId: string } | { type: 'folder'; folder: string }
 
@@ -1446,7 +1447,7 @@ function App() {
         return { stageX: ((event.clientX - rect.left) / rect.width) * 1000, stageY: ((event.clientY - rect.top) / rect.height) * 620 }
     }
 
-    function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem, mode: 'move' | 'resize' = 'move') {
+    function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem) {
         if (activeTool !== 'select' || studentView) return
         setSelectedItemId(item.id)
         event.stopPropagation()
@@ -1454,15 +1455,15 @@ function App() {
             return
         }
         const { stageX, stageY } = coordinates(event)
-        itemGestureRef.current = { mode, item, startX: stageX, startY: stageY, bounds: getItemBounds(item) }
+        itemGestureRef.current = { mode: 'move', item, startX: stageX, startY: stageY, bounds: getItemBounds(item) }
         stageRef.current?.setPointerCapture(event.pointerId)
     }
 
-    function resizeFromHandle(event: ReactPointerEvent<SVGCircleElement>) {
+    function resizeFromHandle(event: ReactPointerEvent<SVGCircleElement>, handle: ResizeHandle) {
         if (!selectedItem) return
         event.stopPropagation()
         const { stageX, stageY } = coordinates(event)
-        itemGestureRef.current = { mode: 'resize', item: selectedItem, startX: stageX, startY: stageY, bounds: getItemBounds(selectedItem) }
+        itemGestureRef.current = { mode: 'resize', item: selectedItem, startX: stageX, startY: stageY, bounds: getItemBounds(selectedItem), handle }
         stageRef.current?.setPointerCapture(event.pointerId)
     }
 
@@ -1702,8 +1703,10 @@ function App() {
                 if (gesture.mode === 'move') updatedItem = moveBoardItem(gesture.item, deltaX, deltaY)
                 else {
                     const dimension = Math.max(1, gesture.bounds.width + gesture.bounds.height)
-                    const factor = Math.max(0.35, Math.min(3, 1 + (deltaX + deltaY) / dimension))
-                    updatedItem = resizeBoardItem(gesture.item, factor)
+                    const horizontalDirection = gesture.handle.endsWith('right') ? 1 : -1
+                    const verticalDirection = gesture.handle.startsWith('bottom') ? 1 : -1
+                    const factor = Math.max(0.35, 1 + (deltaX * horizontalDirection + deltaY * verticalDirection) / dimension)
+                    updatedItem = resizeBoardItem(gesture.item, factor, gesture.handle)
                 }
             }
             updateCurrentItems((items) => items.map((item) => item.id === gesture.item.id ? updatedItem : item))
@@ -2266,7 +2269,12 @@ function App() {
                                                 </>}
                                                 {selectedItem.type === 'image' && !studentView && <foreignObject x={bounds.left + bounds.width - 19} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Crop image" aria-label="Crop image" onPointerDown={(event) => event.stopPropagation()} onClick={() => setCropQueue([{ src: selectedItem.src, label: selectedItem.label, left: selectedItem.left, top: selectedItem.top, itemId: selectedItem.id }])}><Crop size={13} /></button></foreignObject>}
                                                 <rect className="selection-move-handle" x={centerX - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} />
-                                                <circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} />
+                                                {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => {
+                                                    const cx = handle.endsWith('right') ? bounds.left + bounds.width + 5 : bounds.left - 5
+                                                    const cy = handle.startsWith('bottom') ? bounds.top + bounds.height + 5 : bounds.top - 5
+                                                    const cursor = handle === 'top-left' || handle === 'bottom-right' ? '' : ' selection-resize-handle-nesw'
+                                                    return <circle key={handle} className={`selection-resize-handle${cursor}`} cx={cx} cy={cy} r="8" aria-label={`Resize from ${handle.replace('-', ' ')}`} onPointerDown={(event) => resizeFromHandle(event, handle)} />
+                                                })}
                                             </g>
                                         })()}
                                         {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
