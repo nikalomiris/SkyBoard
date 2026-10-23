@@ -6,13 +6,14 @@ import {
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
+    Crop, Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
 import CardDeck, { DECK_ITEM_PREFIX, buildDeckPageItems, emptyDeckSession } from './components/CardDeck'
 import type { DeckSession } from './components/CardDeck'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
+import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
@@ -190,6 +191,7 @@ function App() {
     const [showImageSearch, setShowImageSearch] = useState(false)
     const [imageQuery, setImageQuery] = useState('')
     const [imageUrl, setImageUrl] = useState('')
+    const [cropQueue, setCropQueue] = useState<{ src: string; label: string; left: number; top: number; itemId?: string }[]>([])
     const [imageResults, setImageResults] = useState<{ id: string; thumb: string; src: string; title: string }[]>([])
     const [imageSearching, setImageSearching] = useState(false)
     const [imageSearchError, setImageSearchError] = useState('')
@@ -833,7 +835,7 @@ function App() {
             })
             return reordered
         })
-        updateLessonPages(nextPages)
+        updateLessonPages(renumberDefaultPages(nextPages))
         setPageIndex(nextPageIndex)
         setSelectedItemId(null)
     }
@@ -1271,6 +1273,11 @@ function App() {
         insertPage(pages.length, `Page ${pages.length + 1}`, [])
     }
 
+    // Default "Page N" names follow the page's actual position; custom names are kept.
+    function renumberDefaultPages(names: string[]) {
+        return names.map((name, index) => /^Page \d+$/.test(name) ? `Page ${index + 1}` : name)
+    }
+
     function updateLessonPages(nextPages: string[]) {
         if (!openLesson) return
         const updatedLesson = { ...openLesson, pages: nextPages, updated: 'Just now', updatedAt: Date.now() }
@@ -1307,7 +1314,7 @@ function App() {
         }
         for (let i = index; i <= pages.length; i++) delete historyRef.current[`${lessonId}:${i}`]
         const newKey = `${lessonId}:${index}`
-        updateLessonPages([...pages.slice(0, index), name, ...pages.slice(index)])
+        updateLessonPages(renumberDefaultPages([...pages.slice(0, index), name, ...pages.slice(index)]))
         setItemsByPage((previous) => ({ ...shiftKeys(previous), [newKey]: items.map((item) => ({ ...item, id: id() })) }))
         setBackgroundsByPage((previous) => {
             const next = shiftKeys(previous)
@@ -1424,7 +1431,7 @@ function App() {
             : pageIndex - removedBeforeCurrent
         setItemsByPage(reindexPages)
         setBackgroundsByPage(reindexPages)
-        updateLessonPages(nextPages)
+        updateLessonPages(renumberDefaultPages(nextPages))
         setPageIndex(nextPageIndex)
         setSelectedItemId(null)
         setSelectedPageIndices([])
@@ -1755,16 +1762,17 @@ function App() {
         void Promise.allSettled(files.map(readFile)).then((results) => {
             // Cascade each file so the items partially overlap.
             const newItems: BoardItem[] = []
+            const toCrop: { src: string; label: string; left: number; top: number }[] = []
             results.forEach((result, index) => {
                 if (result.status !== 'fulfilled') return
                 const file = files[index]
-                const step = newItems.length
+                const step = newItems.length + toCrop.length
                 const left = 8 + step * 6
                 const top = 14 + step * 7
-                newItems.push(file.type === 'application/pdf'
-                    ? { id: id(), type: 'pdf', left, top, src: result.value, label: file.name }
-                    : { id: id(), type: 'image', left, top, src: result.value, label: file.name })
+                if (file.type === 'application/pdf') newItems.push({ id: id(), type: 'pdf', left, top, src: result.value, label: file.name })
+                else toCrop.push({ src: result.value, label: file.name, left, top })
             })
+            if (toCrop.length) setCropQueue((queue) => [...queue, ...toCrop])
             if (!newItems.length) return
             updateCurrentItems((items) => [...items, ...newItems])
             setSelectedItemId(newItems[newItems.length - 1].id)
@@ -2252,6 +2260,7 @@ function App() {
                                                     <line x1={centerX} y1={bounds.top - 5} x2={centerX} y2={bounds.top - 19} stroke="var(--accent)" strokeWidth="2" pointerEvents="none" />
                                                     <foreignObject x={centerX - 12} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Rotate shape" aria-label="Rotate shape" onPointerDown={rotateFromHandle}><RotateCw size={13} /></button></foreignObject>
                                                 </>}
+                                                {selectedItem.type === 'image' && !studentView && <foreignObject x={bounds.left + bounds.width - 19} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Crop image" aria-label="Crop image" onPointerDown={(event) => event.stopPropagation()} onClick={() => setCropQueue([{ src: selectedItem.src, label: selectedItem.label, left: selectedItem.left, top: selectedItem.top, itemId: selectedItem.id }])}><Crop size={13} /></button></foreignObject>}
                                                 <rect className="selection-move-handle" x={centerX - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} />
                                                 <circle className="selection-resize-handle" cx={bounds.left + bounds.width + 5} cy={bounds.top + bounds.height + 5} r="8" onPointerDown={resizeFromHandle} />
                                             </g>
@@ -2526,7 +2535,11 @@ function App() {
                     </>}
                 </>}
             </div></div>}
-            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search the web for pictures and click one to add it to your page.</p><form className="image-search-form" onSubmit={async (event) => { event.preventDefault(); const q = imageQuery.trim(); if (!q) return; setImageSearching(true); setImageSearchError(''); try { const response = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(`${q} filetype:bitmap`)}&gsrlimit=30&prop=imageinfo&iiprop=url|mime&iiurlwidth=240&format=json&origin=*`); if (!response.ok) throw new Error('search failed'); const data = await response.json(); const pages = Object.values(data.query?.pages ?? {}) as { pageid: number; index?: number; title: string; imageinfo?: { thumburl?: string; url: string; mime?: string }[] }[]; const results = pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0)).filter((page) => page.imageinfo?.[0] && /^image\/(jpeg|png|webp|gif)$/.test(page.imageinfo[0].mime ?? '')).map((page) => ({ id: String(page.pageid), thumb: page.imageinfo![0].thumburl || page.imageinfo![0].url, src: page.imageinfo![0].url, title: page.title.replace(/^File:/, '').replace(/\.[^.]+$/, '') })); setImageResults(results); if (!results.length) setImageSearchError('No pictures found. Try another word.') } catch { setImageResults([]); setImageSearchError('Could not search right now. Check your connection or paste an image address below.') } finally { setImageSearching(false) } }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" autoFocus /><button type="submit" disabled={imageSearching}><Search size={15} /> {imageSearching ? 'Searching' : 'Search'}</button></form>{imageSearchError && <p className="image-search-error">{imageSearchError}</p>}{imageResults.length > 0 && <div className="image-results">{imageResults.map((result) => <button type="button" key={result.id} className="image-result" title={result.title} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: result.src, label: result.title }); setShowImageSearch(false) }}><img src={result.thumb} alt={result.title} loading="lazy" /></button>)}</div>}<label className="image-url-label">OR PASTE AN IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { addBoardItem({ id: id(), type: 'image', left: 14, top: 25, src: imageUrl.trim(), label: 'Web image' }); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
+            {cropQueue[0] && <ImageCropDialog key={cropQueue[0].src + cropQueue.length} src={cropQueue[0].src} label={cropQueue[0].label} remaining={cropQueue.length - 1} editing={Boolean(cropQueue[0].itemId)}
+                onCancel={() => setCropQueue([])}
+                onSkip={() => { const pending = cropQueue[0]; if (!pending.itemId) addBoardItem({ id: id(), type: 'image', left: pending.left, top: pending.top, src: pending.src, label: pending.label }); setCropQueue((queue) => queue.slice(1)) }}
+                onConfirm={(cropped) => { const pending = cropQueue[0]; if (pending.itemId) { updateCurrentItems((items) => items.map((candidate) => candidate.id === pending.itemId && candidate.type === 'image' ? { ...candidate, src: cropped, storagePath: undefined } : candidate)); setCropQueue((queue) => queue.slice(1)); return } const item: BoardItem = { id: id(), type: 'image', left: pending.left, top: pending.top, src: cropped, label: pending.label }; addBoardItem(item); setSelectedItemId(item.id); setActiveTool('select'); setShowToolOptions(false); setCropQueue((queue) => queue.slice(1)) }} />}
+            {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search the web for pictures and click one to add it to your page.</p><form className="image-search-form" onSubmit={async (event) => { event.preventDefault(); const q = imageQuery.trim(); if (!q) return; setImageSearching(true); setImageSearchError(''); try { const response = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(`${q} filetype:bitmap`)}&gsrlimit=30&prop=imageinfo&iiprop=url|mime&iiurlwidth=240&format=json&origin=*`); if (!response.ok) throw new Error('search failed'); const data = await response.json(); const pages = Object.values(data.query?.pages ?? {}) as { pageid: number; index?: number; title: string; imageinfo?: { thumburl?: string; url: string; mime?: string }[] }[]; const results = pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0)).filter((page) => page.imageinfo?.[0] && /^image\/(jpeg|png|webp|gif)$/.test(page.imageinfo[0].mime ?? '')).map((page) => ({ id: String(page.pageid), thumb: page.imageinfo![0].thumburl || page.imageinfo![0].url, src: page.imageinfo![0].url, title: page.title.replace(/^File:/, '').replace(/\.[^.]+$/, '') })); setImageResults(results); if (!results.length) setImageSearchError('No pictures found. Try another word.') } catch { setImageResults([]); setImageSearchError('Could not search right now. Check your connection or paste an image address below.') } finally { setImageSearching(false) } }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" autoFocus /><button type="submit" disabled={imageSearching}><Search size={15} /> {imageSearching ? 'Searching' : 'Search'}</button></form>{imageSearchError && <p className="image-search-error">{imageSearchError}</p>}{imageResults.length > 0 && <div className="image-results">{imageResults.map((result) => <button type="button" key={result.id} className="image-result" title={result.title} onClick={() => { setCropQueue((queue) => [...queue, { src: result.src, label: result.title, left: 14, top: 25 }]); setShowImageSearch(false) }}><img src={result.thumb} alt={result.title} loading="lazy" /></button>)}</div>}<label className="image-url-label">OR PASTE AN IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { setCropQueue((queue) => [...queue, { src: imageUrl.trim(), label: 'Web image', left: 14, top: 25 }]); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
         </div>
     )
 }
