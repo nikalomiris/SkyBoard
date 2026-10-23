@@ -2092,6 +2092,37 @@ kbd {
     border: 0;
 }
 
+.shape-fill-controls {
+    grid-column: 1 / -1;
+    display: grid;
+    justify-items: center;
+    gap: 7px;
+}
+
+.shape-fill-controls>label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: color-mix(in srgb, var(--accent) 80%, white);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.shape-fill-controls input[type="checkbox"] {
+    accent-color: var(--accent);
+    margin: 0;
+}
+
+.shape-fill-controls .selection-text-colors {
+    display: grid;
+    grid-template-columns: repeat(3, 20px);
+    justify-content: center;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+}
+
 .selection-toolbar span {
     margin-right: 6px;
     color: color-mix(in srgb, var(--accent) 80%, white);

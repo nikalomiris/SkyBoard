@@ -104,6 +104,8 @@ function App() {
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
     const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'square' | 'triangle' | 'line' | 'arrow'>('circle')
+    const [shapeFillEnabled, setShapeFillEnabled] = useState(false)
+    const [shapeFillColor, setShapeFillColor] = useState(palette[2])
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
     const [ink, setInk] = useState(palette[0])
@@ -731,8 +733,19 @@ function App() {
             updateCurrentItems((items) => items.filter((item) => item.id !== selectedItemId))
             setSelectedItemId(null)
         }
+        const duplicateShortcut = (event: KeyboardEvent) => {
+            if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'd') return
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+            if (!selectedItemId) return
+            event.preventDefault()
+            duplicateSelectedItem()
+        }
         window.addEventListener('keydown', deleteSelected)
-        return () => window.removeEventListener('keydown', deleteSelected)
+        window.addEventListener('keydown', duplicateShortcut)
+        return () => {
+            window.removeEventListener('keydown', deleteSelected)
+            window.removeEventListener('keydown', duplicateShortcut)
+        }
     }, [selectedItemId, currentPageKey, studentView])
 
     async function signOut() {
@@ -1464,6 +1477,17 @@ function App() {
         updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id ? resizeBoardItem(item, factor) : item))
     }
 
+    function duplicateSelectedItem() {
+        if (!selectedItemId || studentView) return
+        const copyId = id()
+        updateCurrentItems((items) => {
+            const source = items.find((item) => item.id === selectedItemId)
+            if (!source) return items
+            return [...items, { ...moveBoardItem(structuredClone(source), 30, 30), id: copyId } as BoardItem]
+        })
+        setSelectedItemId(copyId)
+    }
+
     function deleteSelectedItem() {
         if (!selectedItemId) return
         updateCurrentItems((items) => items.filter((item) => item.id !== selectedItemId))
@@ -1507,9 +1531,32 @@ function App() {
         updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && (item.type === 'stroke' || item.type === 'shape' || item.type === 'note') ? { ...item, color } : item))
     }
 
+    function setSelectedShapeFill(enabled: boolean) {
+        if (!selectedItem || selectedItem.type !== 'shape' || selectedItem.shape === 'line' || selectedItem.shape === 'arrow') return
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id || item.type !== 'shape') return item
+            if (enabled) return { ...item, fillColor: item.fillColor ?? shapeFillColor }
+            const { fillColor: _fillColor, ...shape } = item
+            return shape
+        }))
+    }
+
+    function setSelectedShapeFillColor(color: string) {
+        if (!selectedItem || selectedItem.type !== 'shape') return
+        setShapeFillColor(color)
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'shape' ? { ...item, fillColor: color } : item))
+    }
+
     function renderColorPicker(label: string, selectedColor: string, onSelect: (color: string) => void, colors: string[] = palette): ReactNode {
         return <div className="selection-text-colors" aria-label={`${label} color`}>
             {colors.map((color) => <button key={color} className={selectedColor === color ? 'active' : ''} style={{ backgroundColor: color }} title={`${label} color ${color}`} aria-label={`${label} color ${color}`} onClick={() => onSelect(color)} />)}
+        </div>
+    }
+
+    function renderShapeFillControls(enabled: boolean, color: string, onToggle: (enabled: boolean) => void, onColorChange: (color: string) => void): ReactNode {
+        return <div className="shape-fill-controls">
+            <label><input type="checkbox" checked={enabled} onChange={(event) => onToggle(event.target.checked)} />Fill shape</label>
+            {enabled && renderColorPicker('Fill', color, onColorChange)}
         </div>
     }
 
@@ -1597,7 +1644,7 @@ function App() {
                 stageRef.current.setPointerCapture(event.pointerId)
                 return
             }
-            addBoardItem({ id: id(), type: 'shape', left: stageX / 10, top: stageY / 6.2, shape: selectedShape, color: ink })
+            addBoardItem({ id: id(), type: 'shape', left: stageX / 10, top: stageY / 6.2, shape: selectedShape, color: ink, ...(shapeFillEnabled ? { fillColor: shapeFillColor } : {}) })
             return
         }
         if (activeTool === 'select') {
@@ -1672,6 +1719,7 @@ function App() {
                     endY: stageY / 6.2,
                     shape: selectedShape,
                     color: ink,
+                    ...(shapeFillEnabled && selectedShape !== 'line' && selectedShape !== 'arrow' ? { fillColor: shapeFillColor } : {}),
                     ...(selectedShape === 'arrow' ? { endArrow: true } : {}),
                 })
             }
@@ -1861,6 +1909,7 @@ function App() {
         return <div className={`selection-toolbar selected-element-toolbar${isGrid ? ' grid-selection-toolbar' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
             <span>Selected element</span>
             {colorControls}
+            {selectedItem.type === 'shape' && selectedItem.shape !== 'line' && selectedItem.shape !== 'arrow' && renderShapeFillControls(Boolean(selectedItem.fillColor), selectedItem.fillColor ?? shapeFillColor, setSelectedShapeFill, setSelectedShapeFillColor)}
             {selectedItem.type === 'shape' && selectedItem.shape === 'line' && <><button className={selectedItem.startArrow ? 'active' : ''} title="Toggle start arrowhead" aria-label="Toggle start arrowhead" aria-pressed={Boolean(selectedItem.startArrow)} onClick={() => toggleLineArrow('start')}><ArrowLeft size={15} /></button><button className={selectedItem.endArrow ? 'active' : ''} title="Toggle end arrowhead" aria-label="Toggle end arrowhead" aria-pressed={Boolean(selectedItem.endArrow)} onClick={() => toggleLineArrow('end')}><MoveRight size={15} /></button></>}
             {selectedItem.type === 'grid' && <>
                 <span className="grid-size-label">{selectedItem.cols ?? 3}×{selectedItem.rows ?? 3}</span>
@@ -1877,6 +1926,7 @@ function App() {
                 <button title="Make smaller" aria-label="Make smaller" onClick={() => scaleSelectedItem(0.85)}><Minus size={15} /></button>
                 <button title="Make larger" aria-label="Make larger" onClick={() => scaleSelectedItem(1.15)}><Plus size={15} /></button>
             </>}
+            <button title="Duplicate selected element (Ctrl/Cmd+D)" aria-label="Duplicate selected element" onClick={duplicateSelectedItem}><Copy size={15} /></button>
             <button className="delete-selection" title="Delete selected element" aria-label="Delete selected element" onClick={deleteSelectedItem}><Trash2 size={15} /></button>
         </div>
     }
@@ -1922,6 +1972,7 @@ function App() {
                         {renderColorPicker('Ink', ink, setInk)}
                     </div>
                 </div>
+                {selectedShape !== 'line' && selectedShape !== 'arrow' && renderShapeFillControls(shapeFillEnabled, shapeFillColor, setShapeFillEnabled, setShapeFillColor)}
             </div>
         }
         return <div className="selection-toolbar color-only-toolbar" onPointerDown={(event) => event.stopPropagation()}>
@@ -1940,10 +1991,10 @@ function App() {
         }
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className={`board-sticky${item.id.startsWith(DECK_ITEM_PREFIX) ? ' deck-sticky' : ''}`} style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
-            if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill="none" stroke={item.color} strokeWidth="4" />
-            if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
-            if (item.shape === 'square') return <rect x={item.left * 10} y={item.top * 6.2} width={92 * scale} height={92 * scale} rx="8" fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 46 * scale} ${item.top * 6.2 + 46 * scale})`} />
-            if (item.shape === 'triangle') return <polygon points={`${item.left * 10 + 62.5 * scale},${item.top * 6.2} ${item.left * 10 + 125 * scale},${item.top * 6.2 + 78 * scale} ${item.left * 10},${item.top * 6.2 + 78 * scale}`} fill="none" stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
+            if (item.shape === 'circle') return <circle cx={item.left * 10} cy={item.top * 6.2} r={46 * scale} fill={item.fillColor ?? 'none'} stroke={item.color} strokeWidth="4" />
+            if (item.shape === 'rectangle') return <rect x={item.left * 10} y={item.top * 6.2} width={125 * scale} height={78 * scale} rx="8" fill={item.fillColor ?? 'none'} stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
+            if (item.shape === 'square') return <rect x={item.left * 10} y={item.top * 6.2} width={92 * scale} height={92 * scale} rx="8" fill={item.fillColor ?? 'none'} stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 46 * scale} ${item.top * 6.2 + 46 * scale})`} />
+            if (item.shape === 'triangle') return <polygon points={`${item.left * 10 + 62.5 * scale},${item.top * 6.2} ${item.left * 10 + 125 * scale},${item.top * 6.2 + 78 * scale} ${item.left * 10},${item.top * 6.2 + 78 * scale}`} fill={item.fillColor ?? 'none'} stroke={item.color} strokeWidth="4" transform={`rotate(${item.rotation ?? 0} ${item.left * 10 + 62.5 * scale} ${item.top * 6.2 + 39 * scale})`} />
             const { start, end } = getLineEndpoints(item)
             const startMarkerId = `line-start-${item.id}`
             const endMarkerId = `line-end-${item.id}`
