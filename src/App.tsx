@@ -17,6 +17,7 @@ import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
@@ -50,6 +51,8 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
 ]
 type LessonSortKey = 'edited-desc' | 'edited-asc' | 'name-asc' | 'name-desc'
 const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited', 'edited-asc': 'Oldest edited', 'name-asc': 'Name (A–Z)', 'name-desc': 'Name (Z–A)' }
+
+type BackgroundFit = 'fill' | 'fit' | 'stretch' | 'center' | 'tile'
 
 function App() {
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
@@ -196,6 +199,16 @@ function App() {
     const itemGestureRef = useRef<ItemGesture | null>(null)
     const historyRef = useRef<Record<string, { past: BoardItem[][]; future: BoardItem[][] }>>({})
     const imageInputRef = useRef<HTMLInputElement>(null)
+    const [backgroundDraft, setBackgroundDraft] = useState<{ src: string; fit: BackgroundFit; scope: 'current' | 'all'; libraryId?: string; name: string; group: string; newGroup: string; busy?: boolean; error?: string } | null>(null)
+    const [backgroundLibrary, setBackgroundLibrary] = useState<LibraryBackground[]>([])
+    const [backgroundLibraryError, setBackgroundLibraryError] = useState('')
+    const backgroundOwnerId = authSession?.user.id ?? null
+    useEffect(() => {
+        if (studentView || (isSupabaseConfigured && !backgroundOwnerId)) { setBackgroundLibrary([]); return }
+        let active = true
+        loadBackgroundLibrary(backgroundOwnerId).then((entries) => { if (active) { setBackgroundLibrary(entries); setBackgroundLibraryError('') } }).catch(() => { if (active) setBackgroundLibrary([]) })
+        return () => { active = false }
+    }, [backgroundOwnerId, studentView])
     const backgroundInputRef = useRef<HTMLInputElement>(null)
     const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
@@ -1570,21 +1583,35 @@ function App() {
     }
 
     function handleImage(event: ChangeEvent<HTMLInputElement>) {
-        const file = event.target.files?.[0]
-        if (!file) return
-        const placeFile = (src?: string) => {
-            if (file.type === 'application/pdf') {
-                if (src) addBoardItem({ id: id(), type: 'pdf', left: 14, top: 27, src, label: file.name })
-            } else if (src) {
-                addBoardItem({ id: id(), type: 'image', left: 12, top: 25, src, label: file.name })
-            }
-            event.target.value = ''
-        }
-        if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+        const input = event.target
+        const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'))
+        input.value = ''
+        if (!files.length) return
+        const readFile = (file: File) => new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
-            reader.onload = () => placeFile(String(reader.result))
+            reader.onload = () => resolve(String(reader.result))
+            reader.onerror = () => reject(reader.error)
             reader.readAsDataURL(file)
-        }
+        })
+        void Promise.allSettled(files.map(readFile)).then((results) => {
+            // Cascade each file so the items partially overlap.
+            const newItems: BoardItem[] = []
+            results.forEach((result, index) => {
+                if (result.status !== 'fulfilled') return
+                const file = files[index]
+                const step = newItems.length
+                const left = 8 + step * 6
+                const top = 14 + step * 7
+                newItems.push(file.type === 'application/pdf'
+                    ? { id: id(), type: 'pdf', left, top, src: result.value, label: file.name }
+                    : { id: id(), type: 'image', left, top, src: result.value, label: file.name })
+            })
+            if (!newItems.length) return
+            updateCurrentItems((items) => [...items, ...newItems])
+            setSelectedItemId(newItems[newItems.length - 1].id)
+            setActiveTool('select')
+            setShowToolOptions(false)
+        })
     }
 
     function onStageClick(event: ReactMouseEvent<HTMLElement>) {
@@ -1600,11 +1627,11 @@ function App() {
         setEditingTextId(newItem.id)
     }
 
-    function setPageBackground(value: string) {
+    function setPageBackground(value: string, scope: 'current' | 'all' = backgroundScope) {
         if (!openLesson) return
         touchOpenLesson()
         setBackgroundsByPage((previous) => {
-            if (backgroundScope === 'all') {
+            if (scope === 'all') {
                 const next = { ...previous }
                 pages.forEach((_, index) => { next[`${openLesson.id}:${index}`] = value })
                 return next
@@ -1613,13 +1640,49 @@ function App() {
         })
     }
 
-    function handleBackgroundImage(event: ChangeEvent<HTMLInputElement>) {
+    function backgroundImageCss(src: string, fit: BackgroundFit) {
+        const layout = { fill: 'center / cover no-repeat', fit: 'center / contain no-repeat', stretch: '0 0 / 100% 100% no-repeat', center: 'center / auto no-repeat', tile: '0 0 / auto repeat' }[fit]
+        return `url("${src}") ${layout} #fffef9`
+    }
+
+    async function handleBackgroundImage(event: ChangeEvent<HTMLInputElement>) {
         const file = event.target.files?.[0]
-        if (!file || !file.type.startsWith('image/')) return
-        const reader = new FileReader()
-        reader.onload = () => setPageBackground(`url("${String(reader.result)}") center / cover no-repeat`)
-        reader.readAsDataURL(file)
         event.target.value = ''
+        if (!file || !file.type.startsWith('image/')) return
+        try {
+            const src = await downscaleImage(file)
+            setBackgroundDraft({ src, fit: 'fill', scope: backgroundScope, name: file.name.replace(/\.[^.]+$/, '') || 'Background', group: '', newGroup: '' })
+            setShowBackgrounds(false)
+        } catch (error) {
+            setBackgroundLibraryError(error instanceof Error ? error.message : 'Could not read that image.')
+        }
+    }
+
+    async function applyBackgroundDraft() {
+        if (!backgroundDraft) return
+        const draft = backgroundDraft
+        const group = (draft.group === '__new__' ? draft.newGroup : draft.group).trim()
+        if (!draft.libraryId) {
+            setBackgroundDraft({ ...draft, busy: true, error: undefined })
+            try {
+                const saved = await addLibraryBackground(backgroundOwnerId, { name: draft.name.trim() || 'Background', group, image: draft.src })
+                setBackgroundLibrary((previous) => [...previous, saved])
+            } catch {
+                setBackgroundDraft({ ...draft, busy: false, error: 'Could not save this image to your library.' })
+                return
+            }
+        }
+        setPageBackground(backgroundImageCss(draft.src, draft.fit), draft.scope)
+        setBackgroundDraft(null)
+    }
+
+    async function deleteLibraryBackground(entry: LibraryBackground) {
+        try {
+            await removeLibraryBackground(backgroundOwnerId, entry.id)
+            setBackgroundLibrary((previous) => previous.filter((candidate) => candidate.id !== entry.id))
+        } catch {
+            setBackgroundLibraryError('Could not remove that background.')
+        }
     }
 
     function handleGridEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number, itemId: string, cols: number, total: number) {
@@ -1957,11 +2020,11 @@ function App() {
                                     </button>
                                 })}</div>}
                             </div>}
-                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
+                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
-                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Add image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={handleBackgroundImage} /><div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
+                            {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Upload image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleBackgroundImage(event)} />{backgroundLibraryError && <p className="form-error" role="alert">{backgroundLibraryError}</p>}{backgroundLibrary.length > 0 && <div className="background-library"><span className="panel-small-label">YOUR BACKGROUNDS</span>{[...new Set(backgroundLibrary.map((entry) => entry.group))].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b)).map((group) => <div key={group} className="background-library-group" role="group" aria-label={group || 'Ungrouped'}>{group && <span className="background-library-group-name">{group}</span>}<div className="background-library-grid">{backgroundLibrary.filter((entry) => entry.group === group).map((entry) => <div key={entry.id} className="background-library-item"><button type="button" title={`Use ${entry.name}`} aria-label={`Use ${entry.name} background`} style={{ backgroundImage: `url("${entry.image}")` }} onClick={() => { setBackgroundDraft({ src: entry.image, fit: 'fill', scope: backgroundScope, libraryId: entry.id, name: entry.name, group: entry.group, newGroup: '' }); setShowBackgrounds(false) }} /><button type="button" className="background-library-remove" title={`Remove ${entry.name} from library`} aria-label={`Remove ${entry.name} from library`} onClick={() => void deleteLibraryBackground(entry)}><X size={12} /></button></div>)}</div></div>)}</div>}<div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
@@ -2069,6 +2132,23 @@ function App() {
                     </div>
                 </div>
             )}
+            {backgroundDraft && openLesson && <div className="modal-scrim" onClick={() => setBackgroundDraft(null)}><form className="share-modal background-image-modal" role="dialog" aria-modal="true" aria-label="Image background" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setBackgroundDraft(null) } }} onSubmit={(event) => { event.preventDefault(); void applyBackgroundDraft() }}>
+                <button type="button" className="modal-close" onClick={() => setBackgroundDraft(null)} aria-label="Cancel image background"><X size={18} /></button>
+                <div className="share-modal-icon"><FileImage size={20} /></div>
+                <h2>Image background</h2>
+                <p>Choose how the image fits the page.</p>
+                <div className="background-image-body"><div className="background-image-main">
+                <div className="background-image-preview" aria-label="Background preview" style={{ background: backgroundImageCss(backgroundDraft.src, backgroundDraft.fit) }} />
+                <div className="new-lesson-field"><span>Image fit</span><div className="background-scope background-fit" role="radiogroup" aria-label="Image fit">{([['fill', 'Fill'], ['fit', 'Fit'], ['stretch', 'Stretch'], ['center', 'Center'], ['tile', 'Tile']] as const).map(([fit, label]) => <button type="button" key={fit} role="radio" aria-checked={backgroundDraft.fit === fit} className={backgroundDraft.fit === fit ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, fit })}>{label}</button>)}</div></div>
+                </div><div className="background-image-side">
+                {!backgroundDraft.libraryId && <><label className="new-lesson-field">Save to library as<input value={backgroundDraft.name} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, name: event.target.value })} maxLength={80} /></label>
+                <label className="new-lesson-field">Group<select value={backgroundDraft.group} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, group: event.target.value })}><option value="">No group</option>{[...new Set(backgroundLibrary.map((entry) => entry.group).filter(Boolean))].map((group) => <option key={group} value={group}>{group}</option>)}<option value="__new__">New group…</option></select></label>
+                {backgroundDraft.group === '__new__' && <label className="new-lesson-field">New group name<input value={backgroundDraft.newGroup} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, newGroup: event.target.value })} maxLength={60} /></label>}</>}
+                <div className="new-lesson-field"><span>Apply to</span><div className="background-scope background-fit" role="radiogroup" aria-label="Apply to"><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'current'} className={backgroundDraft.scope === 'current' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'current' })}>Current page</button><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'all'} className={backgroundDraft.scope === 'all' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'all' })}>All pages in lesson</button></div></div>
+                </div></div>
+                {backgroundDraft.error && <p className="form-error" role="alert">{backgroundDraft.error}</p>}
+                <div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setBackgroundDraft(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={backgroundDraft.busy || (backgroundDraft.group === '__new__' && !backgroundDraft.newGroup.trim())}>{backgroundDraft.busy ? 'Saving…' : 'Set background'}</button></div>
+            </form></div>}
             {postitDraft && <div className="modal-scrim" onClick={() => setPostitDraft(null)}><form className="share-modal postit-editor-modal" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setPostitDraft(null) } }} onSubmit={(event) => { event.preventDefault(); const text = postitDraft.text.trim(); if (!text) return; if (postitDraft.id) { const noteId = postitDraft.id; updateCurrentItems((items) => items.map((candidate) => candidate.id === noteId && candidate.type === 'note' ? { ...candidate, text } : candidate)); setPostitDraft(null); return } addBoardItem({ id: id(), type: 'note', left: postitDraft.left, top: postitDraft.top, text }); setPostitDraft(null) }}><button type="button" className="modal-close" onClick={() => setPostitDraft(null)} aria-label="Close note editor"><X size={18} /></button><div className="share-modal-icon"><StickyNote size={20} /></div><h2>{postitDraft.id ? 'Edit sticky note' : 'Add a sticky note'}</h2><p>Write a reminder for this lesson page.</p><label className="new-lesson-field">Note text<textarea className="postit-textarea" autoFocus value={postitDraft.text} onChange={(event) => setPostitDraft((draft) => draft ? { ...draft, text: event.target.value } : draft)} /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setPostitDraft(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!postitDraft.text.trim()}><StickyNote size={15} /> {postitDraft.id ? 'Save note' : 'Add note'}</button></div></form></div>}
             {showNewLesson && (
                 <div className="modal-scrim" onClick={() => setShowNewLesson(false)}>

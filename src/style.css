@@ -5600,3 +5600,22 @@ button.deck-chip.selected {
     transform: none;
     box-shadow: none;
 }
+
+.background-image-modal { width: min(760px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; overscroll-behavior: contain; }
+.background-image-body { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 0 24px; align-items: start; }
+.background-image-preview { width: 100%; margin-inline: 0; }
+.background-image-modal .new-lesson-actions { position: sticky; bottom: -28px; margin: 20px -28px -28px; padding: 12px 28px 28px; background: white; }
+@media (max-width: 640px) { .background-image-body { grid-template-columns: 1fr; } }
+.background-image-preview { aspect-ratio: 1000 / 620;  margin-top: 15px; border: 1px solid color-mix(in srgb, var(--accent) 14%, white); border-radius: 7px; background-color: #fffef9; }
+.background-fit { flex-direction: row; flex-wrap: wrap; }
+.background-fit button { flex: 1 1 auto; text-align: center; font-weight: 400; }
+.background-fit button.active { font-weight: 600; }
+.form-error { margin: 8px 0 0; color: #b3261e; font-size: 12px; }
+
+.background-library { display: grid; gap: 6px; margin-top: 8px; max-height: 190px; overflow-y: auto; }
+.background-library-group-name { font-size: 12px; font-weight: 600; color: #52605a; }
+.background-library-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.background-library-item { position: relative; }
+.background-library-item > button:first-child { width: 100%; aspect-ratio: 1000 / 620; border: 1px solid #d9dedb; border-radius: 5px; background-size: cover; background-position: center; cursor: pointer; padding: 0; }
+.background-library-remove { position: absolute; top: 2px; right: 2px; display: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: white; align-items: center; justify-content: center; cursor: pointer; }
+.background-library-item:hover .background-library-remove, .background-library-remove:focus-visible { display: inline-flex; }
