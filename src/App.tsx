@@ -1350,7 +1350,9 @@ function App() {
     }
 
     function duplicatePage() {
-        insertPage(pageIndex + 1, `${pages[pageIndex]} copy`, currentItems, backgroundsByPage[currentPageKey])
+        const sourceName = pages[pageIndex]
+        const isDefaultName = /^Page \d+$/.test(sourceName)
+        insertPage(pageIndex + 1, isDefaultName ? `Page ${pageIndex + 2}` : `${sourceName} copy`, currentItems, backgroundsByPage[currentPageKey])
     }
 
     function copyPage() {
