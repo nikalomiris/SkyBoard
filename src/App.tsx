@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
@@ -2292,8 +2292,8 @@ function App() {
                             </div>
                             {!studentView && <div className="page-dock">
                                 <div className="page-tabs">
-                                    {pages.map((page, index) => renamingPageIndex === index ? <div key={`rename-${index}`} className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button
-                                        key={`${page}-${index}`}
+                                    {pages.map((page, index) => <Fragment key={`${page}-${index}`}>
+                                        {renamingPageIndex === index ? <div className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button
                                         type="button"
                                         title={pageSelectionMode ? `${selectedPageIndices.includes(index) ? 'Deselect' : 'Select'} ${page}` : 'Double-click to rename'}
                                         onDoubleClick={() => { if (!pageSelectionMode) startRenamePage(index) }}
@@ -2312,8 +2312,10 @@ function App() {
                                     >
                                         {pageSelectionMode && <span className="page-selection-indicator" aria-hidden="true">{selectedPageIndices.includes(index) && <Check size={12} />}</span>}
                                         <span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}
-                                    </button>)}
-                                    {!pageSelectionMode && <button className="add-page-tab" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={17} /></button>}
+                                    </button>}
+                                        {!pageSelectionMode && index < pages.length - 1 && <button className="insert-page-tab" type="button" onClick={() => insertPage(index + 1, `Page ${index + 2}`, [])} aria-label={`Insert page after ${page}`} title={`Insert page after ${page}`}><Plus size={14} /></button>}
+                                    </Fragment>)}
+                                    {!pageSelectionMode && <button className="insert-page-tab" type="button" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={14} /></button>}
                                 </div>
                                 <div className="page-dock-actions">
                                     {pageSelectionMode

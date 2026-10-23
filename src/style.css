@@ -2612,20 +2612,23 @@ kbd {
     color: color-mix(in srgb, var(--accent) 79%, white);
 }
 
-.add-page-tab {
+.insert-page-tab {
     flex: none;
-    width: 33px;
-    margin: 5px 0;
+    align-self: center;
+    width: 20px;
+    height: 20px;
     display: grid;
     place-items: center;
-    border: 1px dashed color-mix(in srgb, var(--accent) 27%, white);
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--accent) 2%, white);
-    color: color-mix(in srgb, var(--accent) 75%, white);
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: color-mix(in srgb, var(--accent) 58%, white);
+    cursor: pointer;
 }
 
-.add-page-tab:hover {
+.insert-page-tab:hover {
     background: color-mix(in srgb, var(--accent) 9%, white);
+    color: color-mix(in srgb, var(--accent) 90%, black);
 }
 
 .page-dock-actions {
