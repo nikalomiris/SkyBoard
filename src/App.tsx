@@ -15,7 +15,7 @@ import type { DeckSession } from './components/CardDeck'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
@@ -35,6 +35,10 @@ type ItemGesture =
     | { mode: 'rotate'; item: Extract<BoardItem, { type: 'shape' }>; center: Point; startAngle: number; startRotation: number }
 type DeleteConfirmation = { type: 'lesson'; lessonId: string } | { type: 'folder'; folder: string }
 
+type SizedTool = 'pen' | 'brush' | 'highlighter' | 'eraser'
+const sizedTools: SizedTool[] = ['pen', 'brush', 'highlighter', 'eraser']
+const sizePresets: Record<SizedTool, number[]> = { pen: [1, 2, 3, 5, 8, 12], brush: [5, 8, 11, 16, 24, 34], highlighter: [12, 18, 24, 34, 46, 60], eraser: [14, 20, 28, 44, 64, 84] }
+const toolOpacity: Record<SizedTool, number> = { pen: 1, brush: 0.76, highlighter: 0.42, eraser: 1 }
 const studentToolIds: Tool[] = ['pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
@@ -103,6 +107,10 @@ function App() {
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
     const [ink, setInk] = useState(palette[0])
+    const [toolSizes, setToolSizes] = useState<Record<SizedTool, number>>({ pen: 3, brush: 11, highlighter: 24, eraser: 28 })
+    const [hoverVisible, setHoverVisible] = useState(false)
+    const hoverPosRef = useRef<[number, number]>([0, 0])
+    const hoverCursorRef = useRef<SVGCircleElement | null>(null)
     const [backgroundsByPage, setBackgroundsByPage] = useState<Record<string, string>>(() => isSupabaseConfigured ? {} : readStored('skyboard:backgrounds', {}))
     const [backgroundScope, setBackgroundScope] = useState<'current' | 'all'>('current')
     const [showBackgrounds, setShowBackgrounds] = useState(false)
@@ -165,6 +173,9 @@ function App() {
     const [coverEditorLessonId, setCoverEditorLessonId] = useState<string | null>(null)
     const [renamingTitle, setRenamingTitle] = useState(false)
     const [showStudentFolderDialog, setShowStudentFolderDialog] = useState(false)
+    const [renamingFolder, setRenamingFolder] = useState<string | null>(null)
+    const [folderRenameValue, setFolderRenameValue] = useState('')
+    const [folderRenameError, setFolderRenameError] = useState('')
     const [clipboardPages, setClipboardPages] = useState<ClipboardPage[]>(() => readStored<ClipboardPage[]>('skyboard:page-clipboard', []))
     const [showPasteDialog, setShowPasteDialog] = useState(false)
     const [subfolderParent, setSubfolderParent] = useState<string | null>(null)
@@ -463,7 +474,7 @@ function App() {
             if (lastDraftSentRef.current) { lastDraftSentRef.current = 0; send(null) }
             return
         }
-        const style = activeTool === 'highlighter' ? { width: 24, opacity: 0.42 } : activeTool === 'brush' ? { width: 11, opacity: 0.76 } : { width: 3, opacity: 1 }
+        const style = sizedTools.includes(activeTool as SizedTool) ? { width: toolSizes[activeTool as SizedTool], opacity: toolOpacity[activeTool as SizedTool] } : { width: 3, opacity: 1 }
         const delay = Math.max(0, 40 - (Date.now() - lastDraftSentRef.current))
         const timeout = window.setTimeout(() => {
             lastDraftSentRef.current = Date.now()
@@ -1159,6 +1170,52 @@ function App() {
         setFolderMenu(null)
     }
 
+    function startRenameFolder(folder: string) {
+        setRenamingFolder(folder)
+        setFolderRenameValue(getFolderName(folder))
+        setFolderRenameError('')
+        setFolderMenu(null)
+    }
+
+    function commitFolderRename() {
+        if (!renamingFolder) return
+        const name = folderRenameValue.trim()
+        if (!name || name.includes(folderSeparator)) {
+            setFolderRenameError(name ? 'Folder names cannot contain “ / ”.' : 'Enter a name.')
+            return
+        }
+        const parent = getFolderParent(renamingFolder)
+        const currentName = getFolderName(renamingFolder)
+        if (name.toLocaleLowerCase() === currentName.toLocaleLowerCase()) {
+            setRenamingFolder(null)
+            setFolderRenameError('')
+            return
+        }
+        const existingPaths = [...folders, ...lessons.map((lesson) => lesson.folder)]
+        const duplicate = existingPaths.some((folder) =>
+            folder !== renamingFolder
+            && getFolderParent(folder) === parent
+            && getFolderName(folder).toLocaleLowerCase() === name.toLocaleLowerCase())
+        if (duplicate) {
+            setFolderRenameError('A student or folder with that name already exists here.')
+            return
+        }
+
+        const renamedFolder = parent ? `${parent}${folderSeparator}${name}` : name
+        const renamePath = (path: string) => folderIsWithin(path, renamingFolder)
+            ? `${renamedFolder}${path.slice(renamingFolder.length)}`
+            : path
+        setFolders((previous) => previous.map(renamePath))
+        setLessons((previous) => previous.map((lesson) => ({ ...lesson, folder: renamePath(lesson.folder) })))
+        setOpenLesson((previous) => previous ? { ...previous, folder: renamePath(previous.folder) } : previous)
+        setActiveFolder((previous) => renamePath(previous))
+        setNewLessonFolder((previous) => renamePath(previous))
+        setCopyDestinationFolder((previous) => renamePath(previous))
+        if (!parent) setMockStudentFolders((previous) => previous.map(renamePath))
+        setRenamingFolder(null)
+        setFolderRenameError('')
+    }
+
     function createStudentFolder() {
         const folder = createFolder(true, subfolderName)
         if (!folder) return
@@ -1555,6 +1612,13 @@ function App() {
 
     function onStageMove(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
+        if (event.pointerType !== 'touch' && sizedTools.includes(activeTool as SizedTool)) {
+            const { stageX: hoverX, stageY: hoverY } = coordinates(event)
+            hoverPosRef.current = [hoverX, hoverY]
+            hoverCursorRef.current?.setAttribute('cx', String(hoverX))
+            hoverCursorRef.current?.setAttribute('cy', String(hoverY))
+            if (!hoverVisible) setHoverVisible(true)
+        }
         if (studentView && studentInviteRef.current && Date.now() - lastCursorSentRef.current > 50) {
             const rect = stageRef.current.getBoundingClientRect()
             if (rect.width && rect.height) {
@@ -1618,12 +1682,10 @@ function App() {
             const eraserPoints = parsePoints(currentPoints)
             updateCurrentItems((items) => items.filter((item) => {
                 if (item.type !== 'stroke') return true
-                return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, 22 + item.width / 2)
+                return !polylinesWithinDistance(parsePoints(item.points), eraserPoints, toolSizes.eraser / 2 + 8 + item.width / 2)
             }))
         } else if (drawing && currentPoints && activeTool !== 'eraser' && activeTool !== 'laser') {
-            const style = activeTool === 'highlighter' ? { color: ink, width: 24, opacity: 0.42 } :
-                activeTool === 'brush' ? { color: ink, width: 11, opacity: 0.76 } :
-                    { color: ink, width: 3, opacity: 1 }
+            const style = { color: ink, width: toolSizes[activeTool as SizedTool] ?? 3, opacity: toolOpacity[activeTool as SizedTool] ?? 1 }
             updateCurrentItems((items) => [...items, { id: id(), type: 'stroke', points: currentPoints, ...style }])
         }
         if (activeTool === 'laser') { setLaserFading(true); laserFadeRef.current = window.setTimeout(() => { setCurrentPoints(''); setLaserFading(false) }, 1500) }
@@ -1819,8 +1881,24 @@ function App() {
         </div>
     }
 
+    function renderSizePicker(tool: SizedTool): ReactNode {
+        const label = tool === 'eraser' ? 'Eraser size' : 'Stroke thickness'
+        return <div className="stroke-size-options" role="radiogroup" aria-label={label}>
+            {sizePresets[tool].map((size, index) => <button key={size} type="button" role="radio" aria-checked={toolSizes[tool] === size} className={toolSizes[tool] === size ? 'active' : ''} aria-label={`${label} ${index + 1} of 6`} title={`${label} ${index + 1}`} onClick={() => setToolSizes((sizes) => ({ ...sizes, [tool]: size }))}>
+                <span style={{ width: Math.min(18, Math.max(2, size / (tool === 'eraser' ? 3.5 : tool === 'highlighter' ? 2.6 : 1.4))), height: Math.min(18, Math.max(2, size / (tool === 'eraser' ? 3.5 : tool === 'highlighter' ? 2.6 : 1.4))) }} />
+            </button>)}
+        </div>
+    }
+
     function renderToolColorToolbar(): ReactNode {
-        if (selectedItem || !['pen', 'brush', 'highlighter', 'shape', 'text'].includes(activeTool)) return null
+        if (selectedItem || !['pen', 'brush', 'highlighter', 'eraser', 'shape', 'text'].includes(activeTool)) return null
+        if (activeTool === 'eraser') {
+            return <div className="selection-toolbar color-only-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                <span>Eraser</span>
+                {renderSizePicker('eraser')}
+            </div>
+        }
+        const sizedTool = sizedTools.includes(activeTool as SizedTool) ? activeTool as SizedTool : null
         const toolLabel = activeTool === 'shape' ? 'New shape' : activeTool === 'text' ? 'New text' : 'Ink'
         if (activeTool === 'shape' && showToolOptions) {
             const shapes = [
@@ -1849,12 +1927,13 @@ function App() {
         return <div className="selection-toolbar color-only-toolbar" onPointerDown={(event) => event.stopPropagation()}>
             <span>{toolLabel}</span>
             {renderColorPicker('Ink', ink, setInk)}
+            {sizedTool && renderSizePicker(sizedTool)}
         </div>
     }
 
     function renderBoardItem(item: BoardItem): ReactNode {
         const scale = item.scale ?? 1
-        if (item.type === 'stroke') return <polyline points={item.points} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
+        if (item.type === 'stroke') return <path d={smoothPath(item.points)} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
         if (item.type === 'text') {
             const bounds = getItemBounds(item)
             return <text x={bounds.left + bounds.width / 2} y={bounds.top + bounds.height / 2} textAnchor="middle" dominantBaseline="central" fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
@@ -1966,7 +2045,7 @@ function App() {
                                 const isMockFolder = (!parent && mockStudentFolders.includes(folder)) || (isMockWorkspace && !parent && mockFolderNames.has(folder))
                                 return <div className={`folder-row ${parent ? 'subfolder-row' : ''}`} key={folder} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); if (draggingId) moveLesson(draggingId, folder) }}>
                                     <button className={`nav-item ${activeFolder === folder ? 'active' : ''}`} onClick={() => setActiveFolder(folder)}><Folder size={parent ? 14 : 17} className={`folder-color folder-${index % 4}`} /><span>{getFolderName(folder)}</span>{isMockFolder && <span className="demo-tag" title="Sample student">Demo</span>}</button>
-                                    <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button className="danger-option" onClick={() => { setDeleteConfirmation({ type: 'folder', folder }); setFolderMenu(null) }}><Trash2 size={14} /> Delete {parent ? 'folder' : 'student'}</button></div>}</div>
+                                    <div className="folder-menu-anchor"><button className="folder-more" aria-label={`Options for ${folder}`} onClick={() => setFolderMenu(folderMenu === folder ? null : folder)}><MoreHorizontal size={16} /></button>{folderMenu === folder && <div className="folder-menu">{!parent && <button onClick={() => startCreateSubfolder(folder)}><FolderPlus size={14} /> Add subfolder</button>}<button onClick={() => startRenameFolder(folder)}><Pencil size={14} /> Rename {parent ? 'folder' : 'student'}</button><button className="danger-option" onClick={() => { setDeleteConfirmation({ type: 'folder', folder }); setFolderMenu(null) }}><Trash2 size={14} /> Delete {parent ? 'folder' : 'student'}</button></div>}</div>
                                 </div>
                             })}
                         </nav>
@@ -2096,7 +2175,7 @@ function App() {
                             {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select></div>}
                             </div>
                             <div className="board-page-area">
-                                <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
+                                <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} onPointerLeave={() => setHoverVisible(false)} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
                                         {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
                                             className="board-text-input"
@@ -2127,20 +2206,23 @@ function App() {
                                             </g>
                                         })()}
                                         {lineDraft && <line x1={lineDraft.start[0]} y1={lineDraft.start[1]} x2={lineDraft.end[0]} y2={lineDraft.end[1]} stroke={ink} strokeWidth="4" />}
+                                        {hoverVisible && !drawing && sizedTools.includes(activeTool as SizedTool) && (activeTool === 'eraser'
+                                            ? <circle className="eraser-cursor" ref={hoverCursorRef} cx={hoverPosRef.current[0]} cy={hoverPosRef.current[1]} r={toolSizes.eraser / 2} pointerEvents="none" />
+                                            : <circle className="brush-cursor" ref={hoverCursorRef} cx={hoverPosRef.current[0]} cy={hoverPosRef.current[1]} r={toolSizes[activeTool as SizedTool] / 2} fill={ink} fillOpacity={toolOpacity[activeTool as SizedTool]} pointerEvents="none" />)}
                                         {currentPoints && drawing && activeTool === 'eraser' && (() => {
                                             const erasePoints = parsePoints(currentPoints)
                                             const [lastX, lastY] = erasePoints[erasePoints.length - 1]
-                                            return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
+                                            return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={toolSizes.eraser / 2} pointerEvents="none" />
                                         })()}
-                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <polyline className={activeTool === 'laser' ? `laser-stroke${laserFading ? ' fading' : ''}` : ''} points={currentPoints} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={activeTool === 'highlighter' ? 24 : activeTool === 'brush' ? 11 : 3} strokeOpacity={activeTool === 'highlighter' ? 0.42 : activeTool === 'brush' ? 0.76 : 1} strokeLinecap="round" strokeLinejoin="round" />}
+                                        {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <path className={activeTool === 'laser' ? `laser-stroke${laserFading ? ' fading' : ''}` : ''} d={smoothPath(currentPoints)} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={toolSizes[activeTool as SizedTool] ?? 3} strokeOpacity={toolOpacity[activeTool as SizedTool] ?? 1} strokeLinecap="round" strokeLinejoin="round" />}
                                                                                 {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
                                             const remotePoints = parsePoints(remoteDraft.points)
                                             const [lastX, lastY] = remotePoints[remotePoints.length - 1]
                                             return remoteDraft.kind === 'eraser'
-                                                ? <circle className="eraser-cursor" cx={lastX} cy={lastY} r={14} pointerEvents="none" />
+                                                ? <circle className="eraser-cursor" cx={lastX} cy={lastY} r={remoteDraft.width / 2} pointerEvents="none" />
                                                 : <circle cx={lastX} cy={lastY} r={9} fill="#ef6b58" fillOpacity={0.85} pointerEvents="none" />
                                         })()}
-                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind === 'ink' && <polyline points={remoteDraft.points} fill="none" stroke={remoteDraft.color} strokeWidth={remoteDraft.width} strokeOpacity={remoteDraft.opacity} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
+                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind === 'ink' && <path d={smoothPath(remoteDraft.points)} fill="none" stroke={remoteDraft.color} strokeWidth={remoteDraft.width} strokeOpacity={remoteDraft.opacity} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
                                     </svg>
                                     {!studentView && Object.entries(studentCursors).filter(([, cursor]) => cursor.pageIndex === pageIndex).map(([inviteId, cursor]) => <div key={inviteId} className="live-student-cursor" style={{ left: `${cursor.x * 100}%`, top: `${cursor.y * 100}%`, color: cursor.color }}><MousePointer2 size={18} fill="currentColor" /><span>{cursor.name}</span></div>)}
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
@@ -2375,6 +2457,7 @@ function App() {
                 </div>
             })()}
             {showStudentFolderDialog && <div className="modal-scrim" onClick={() => setShowStudentFolderDialog(false)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createStudentFolder() }}><button type="button" className="modal-close" onClick={() => setShowStudentFolderDialog(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New student folder</h2><p>Create a folder to organize one student.</p><label className="new-lesson-field">Student name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Maya" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setShowStudentFolderDialog(false)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create folder</button></div></form></div>}
+            {renamingFolder && <div className="modal-scrim" onClick={() => setRenamingFolder(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); commitFolderRename() }}><button type="button" className="modal-close" onClick={() => setRenamingFolder(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Pencil size={20} /></div><h2>Rename {getFolderParent(renamingFolder) ? 'folder' : 'student'}</h2><p>{getFolderParent(renamingFolder) ? `Inside ${getFolderParent(renamingFolder)}` : 'Update this student name and keep their folders and lessons together.'}</p><label className="new-lesson-field">{getFolderParent(renamingFolder) ? 'Folder name' : 'Student name'}<input autoFocus required value={folderRenameValue} onChange={(event) => { setFolderRenameValue(event.target.value); setFolderRenameError('') }} /></label>{folderRenameError && <p className="form-error" role="alert">{folderRenameError}</p>}<div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setRenamingFolder(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!folderRenameValue.trim()}><Pencil size={15} /> Rename</button></div></form></div>}
             {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
             {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}

@@ -7,6 +7,23 @@ export function parsePoints(points: string): Point[] {
     return points.trim().split(/\s+/).filter(Boolean).map((point) => point.split(',').map(Number) as Point)
 }
 
+// Quadratic curves through segment midpoints turn jagged polylines into smooth paths.
+export function smoothPath(points: string): string {
+    const pts = parsePoints(points).filter((point) => point.every(Number.isFinite))
+    if (!pts.length) return ''
+    const f = (n: number) => Math.round(n * 100) / 100
+    if (pts.length === 1) return `M${f(pts[0][0])},${f(pts[0][1])}h0.01`
+    if (pts.length === 2) return `M${f(pts[0][0])},${f(pts[0][1])}L${f(pts[1][0])},${f(pts[1][1])}`
+    let d = `M${f(pts[0][0])},${f(pts[0][1])}`
+    for (let i = 1; i < pts.length - 1; i++) {
+        const midX = (pts[i][0] + pts[i + 1][0]) / 2
+        const midY = (pts[i][1] + pts[i + 1][1]) / 2
+        d += `Q${f(pts[i][0])},${f(pts[i][1])} ${f(midX)},${f(midY)}`
+    }
+    const last = pts[pts.length - 1]
+    return `${d}L${f(last[0])},${f(last[1])}`
+}
+
 export function pointToSegmentDistance(point: Point, start: Point, end: Point) {
     const deltaX = end[0] - start[0]
     const deltaY = end[1] - start[1]

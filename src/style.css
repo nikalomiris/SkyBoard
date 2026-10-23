@@ -5661,3 +5661,53 @@ button.deck-chip.selected {
 .background-library-item > button:first-child { width: 100%; aspect-ratio: 1000 / 620; border: 1px solid #d9dedb; border-radius: 5px; background-size: cover; background-position: center; cursor: pointer; padding: 0; }
 .background-library-remove { position: absolute; top: 2px; right: 2px; display: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: white; align-items: center; justify-content: center; cursor: pointer; }
 .background-library-item:hover .background-library-remove, .background-library-remove:focus-visible { display: inline-flex; }
+
+.brush-cursor {
+    stroke: color-mix(in srgb, var(--accent) 60%, white);
+    stroke-width: 1;
+}
+
+.stroke-size-control {
+    display: grid;
+    gap: 4px;
+    font-size: 0.75rem;
+}
+
+.stroke-size-control input[type="range"] {
+    width: 100%;
+    min-width: 0;
+}
+
+.stroke-size-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.stroke-size-options button {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--line, #d8dedb);
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.stroke-size-options button span {
+    display: block;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.stroke-size-options button.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.selection-toolbar .stroke-size-options button span {
+    margin: 0;
+    flex: none;
+}
