@@ -120,9 +120,32 @@ export function getItemBounds(item: BoardItem): ItemBounds {
         return boundsForPoints(corners.map((point) => rotatePoint(point, center, item.rotation ?? 0)))
     }
     if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
+    if (item.type === 'image') {
+        const size = getImageSize(item.src)
+        return { left, top, width: size.width * scale, height: size.height * scale }
+    }
     const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
     const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
     return { left, top, width: width * scale, height: height * scale }
+}
+
+const IMAGE_BOX = { width: 230, height: 180 }
+const imageAspects = new Map<string, number>()
+
+export function registerImageAspect(src: string, naturalWidth: number, naturalHeight: number) {
+    if (!naturalWidth || !naturalHeight) return false
+    const aspect = naturalWidth / naturalHeight
+    if (imageAspects.get(src) === aspect) return false
+    imageAspects.set(src, aspect)
+    return true
+}
+
+// Fits the image inside the default box while keeping its natural aspect ratio.
+export function getImageSize(src: string) {
+    const aspect = imageAspects.get(src)
+    if (!aspect) return IMAGE_BOX
+    const width = Math.min(IMAGE_BOX.width, IMAGE_BOX.height * aspect)
+    return { width, height: width / aspect }
 }
 
 export function moveBoardItem(item: BoardItem, deltaX: number, deltaY: number): BoardItem {

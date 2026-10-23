@@ -16,7 +16,7 @@ import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBo
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem } from './lib/boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
@@ -60,6 +60,7 @@ const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited'
 type BackgroundFit = 'fill' | 'fit' | 'stretch' | 'center' | 'tile'
 
 function App() {
+    const [, setImageSizeVersion] = useState(0)
     const [studentView] = useState(() => new URLSearchParams(window.location.search).get('view') === 'student')
     const [sharedLessonStatus, setSharedLessonStatus] = useState<'loading' | 'ready' | 'error' | 'removed' | 'waiting'>(() => isSupabaseConfigured && studentView ? 'loading' : 'ready')
     const [sharedLessonError, setSharedLessonError] = useState('')
@@ -1635,8 +1636,9 @@ function App() {
                     const height = item.shape === 'square' ? 92 : 78
                     return stageX >= itemX - 12 && stageX <= itemX + width + 12 && stageY >= itemY - 12 && stageY <= itemY + height + 12
                 }
-                const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : 230
-                const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : 180
+                const imageSize = item.type === 'image' ? getImageSize(item.src) : null
+                const width = imageSize ? imageSize.width : item.type === 'grid' ? 294 : item.type === 'note' ? 190 : 230
+                const height = imageSize ? imageSize.height : item.type === 'grid' ? 184 : item.type === 'note' ? 170 : 180
                 return stageX >= itemX - 10 && stageX <= itemX + width && stageY >= itemY - 10 && stageY <= itemY + height
             })
             if (hit) updateCurrentItems((items) => items.filter((item) => item.id !== hit.id))
@@ -2031,7 +2033,7 @@ function App() {
                 </foreignObject>
             )
         }
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={230 * scale} height={180 * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} /></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
