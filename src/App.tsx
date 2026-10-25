@@ -1285,7 +1285,7 @@ function App() {
         const updatedLesson = { ...openLesson, pages: nextPages, updated: 'Just now', updatedAt: Date.now() }
         setPages(nextPages)
         setOpenLesson(updatedLesson)
-        setLessons((previous) => previous.map((lesson) => lesson.id === updatedLesson.id ? updatedLesson : lesson))
+        setLessons((previous) => previous.map((lesson) => lesson.id === updatedLesson.id ? { ...lesson, pages: updatedLesson.pages, updated: updatedLesson.updated, updatedAt: updatedLesson.updatedAt } : lesson))
     }
 
     function startRenamePage(index: number) {
