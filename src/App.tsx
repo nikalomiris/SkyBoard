@@ -6,7 +6,7 @@ import {
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    Crop, Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
+    AlignLeft, AlignCenter, AlignRight, Crop, Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
@@ -16,7 +16,7 @@ import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBo
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect } from './lib/boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, TEXT_LINE_HEIGHT } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
@@ -1598,6 +1598,11 @@ function App() {
         }))
     }
 
+    function setSelectedTextAlign(align: 'left' | 'center' | 'right') {
+        if (!selectedItem || selectedItem.type !== 'text') return
+        updateCurrentItems((items) => items.map((item) => item.id === selectedItem.id && item.type === 'text' ? { ...item, align } : item))
+    }
+
     function setSelectedFontFamily(fontFamily: string) {
         if (!selectedItem || (selectedItem.type !== 'text' && selectedItem.type !== 'grid' && selectedItem.type !== 'note')) return
         if (selectedItem.type === 'note') {
@@ -1617,6 +1622,12 @@ function App() {
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
+        if (editingTextId) {
+            // The input may have lost focus to the toolbar, so its blur never ended the edit.
+            const editedId = editingTextId
+            setEditingTextId(null)
+            if (currentItems.some((item) => item.id === editedId && item.type === 'text' && !item.text.trim())) updateCurrentItems((items) => items.filter((item) => item.id !== editedId))
+        }
         if (activeTool === 'text' || activeTool === 'postit') return
         if (activeTool === 'element-eraser') {
             const hit = currentItems.find((item) => {
@@ -2010,7 +2021,10 @@ function App() {
         if (item.type === 'stroke') return <path d={smoothPath(item.points)} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
         if (item.type === 'text') {
             const bounds = getItemBounds(item)
-            return <text x={bounds.left + bounds.width / 2} y={bounds.top + bounds.height / 2} textAnchor="middle" dominantBaseline="central" fill={item.color} fontSize={item.size * scale} fontFamily={item.fontFamily ?? defaultTextFont}>{item.text}</text>
+            const lineSize = item.size * scale
+            const align = item.align ?? 'center'
+            const anchorX = align === 'left' ? bounds.left : align === 'right' ? bounds.left + bounds.width : bounds.left + bounds.width / 2
+            return <>{item.text.split('\n').map((line, index) => <text key={index} x={anchorX} y={bounds.top + lineSize * 0.75 + index * lineSize * TEXT_LINE_HEIGHT} textAnchor={align === 'left' ? 'start' : align === 'right' ? 'end' : 'middle'} dominantBaseline="central" fill={item.color} fontSize={lineSize} fontFamily={item.fontFamily ?? defaultTextFont}>{line}</text>)}</>
         }
         if (item.type === 'note') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={190 * scale} height={170 * scale}><div className={`board-sticky${item.id.startsWith(DECK_ITEM_PREFIX) ? ' deck-sticky' : ''}`} style={{ backgroundColor: item.color ?? notePalette[0], fontSize: `${(item.fontSize ?? 14) * scale}px`, fontFamily: item.fontFamily ?? defaultTextFont }}>{item.text}</div></foreignObject>
         if (item.type === 'shape') {
@@ -2246,17 +2260,17 @@ function App() {
                                 <button type="button" title="Increase note text size" aria-label="Increase note text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
                                 <select className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Note text font" title="Note text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
                             </div>}
-                            {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select></div>}
+                            {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>{([['left', 'Align left', AlignLeft], ['center', 'Align center', AlignCenter], ['right', 'Align right', AlignRight]] as const).map(([value, label, Icon]) => <button key={value} type="button" role="radio" aria-checked={(selectedItem.align ?? 'center') === value} className={(selectedItem.align ?? 'center') === value ? 'active' : ''} aria-label={label} title={label} onClick={() => setSelectedTextAlign(value)}><Icon size={15} /></button>)}</div>}
                             </div>
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} onPointerLeave={() => setHoverVisible(false)} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? <foreignObject x={item.left * 10 - 6} y={item.top * 6.2 - item.size * (item.scale ?? 1)} width={Math.max(220, (item.text.length + 3) * item.size * (item.scale ?? 1) * 0.8 + 40)} height={(item.size * (item.scale ?? 1)) * 2.2}><input
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? (() => { const b = getItemBounds(item); const ls = item.size * (item.scale ?? 1); const w = Math.max(220, b.width + 40); const a = item.align ?? 'center'; const x = a === 'left' ? b.left - 5 : a === 'right' ? b.left + b.width + 5 - w : b.left + b.width / 2 - w / 2; return <foreignObject x={x} y={b.top + ls * 0.15 - 3} width={w} height={item.text.split('\n').length * ls * TEXT_LINE_HEIGHT + 6}><textarea
                                             className="board-text-input"
                                             autoFocus
                                             value={item.text}
                                             placeholder="Type here…"
-                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: item.fontFamily ?? defaultTextFont }}
+                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: item.fontFamily ?? defaultTextFont, lineHeight: TEXT_LINE_HEIGHT, textAlign: item.align ?? 'center' }}
                                             onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
                                             onBlur={(event) => {
                                                 const nextFocus = event.relatedTarget
@@ -2264,8 +2278,8 @@ function App() {
                                                 setEditingTextId(null)
                                                 if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id))
                                             }}
-                                            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'Escape') { event.currentTarget.blur() } }}
-                                        /></foreignObject> : renderBoardItem(item)}</g>)}
+                                            onKeyDown={(event) => { if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur() } }}
+                                        /></foreignObject> })() : renderBoardItem(item)}</g>)}
                                         {selectedItem && selectedItem.id !== editingTextId && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
