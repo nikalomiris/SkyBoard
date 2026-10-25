@@ -4031,6 +4031,12 @@ kbd {
         overflow: visible;
     }
 
+    .print-pages,
+    .print-pages * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
     .print-pages {
         display: block;
     }
