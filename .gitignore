@@ -6,3 +6,6 @@ dist/
 !.env.example
 .vscode/settings.json
 supabase/.temp/
+
+# Playwright MCP artifacts
+.playwright-mcp/
