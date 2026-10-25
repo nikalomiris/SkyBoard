@@ -4,7 +4,7 @@ import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, Download, Eye, F
 import LessonThumbnail from './LessonThumbnail'
 import { getImageSize, getItemBounds, getLineEndpoints, registerImageAspect, smoothPath } from '../lib/boardGeometry'
 import {
-    detachVersionAssets, formatPrice, listMyListings, listPublishedListings, listPurchases, loadOwnedVersion,
+    detachVersionAssets, formatPrice, listPurchases, listVisibleListings, loadOwnedVersion, loadPreviewPages,
     publishLesson, purchaseListing, setListingStatus,
 } from '../lib/marketplaceRepository'
 import type { MarketplaceListing, MarketplacePage, MarketplacePurchase, MarketplaceVersion } from '../lib/marketplaceRepository'
@@ -104,6 +104,7 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
     const [error, setError] = useState('')
     const [status, setStatus] = useState('')
     const [busyId, setBusyId] = useState('')
+    const [previews, setPreviews] = useState<Record<string, MarketplacePage[]>>({})
     const [detail, setDetail] = useState<MarketplaceListing | null>(null)
     const [owned, setOwned] = useState<{ purchase: MarketplacePurchase; version: MarketplaceVersion } | null>(null)
     const [previewPage, setPreviewPage] = useState(0)
@@ -121,15 +122,27 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
         setLoading(true)
         setError('')
         try {
-            const [published, mine, bought] = await Promise.all([listPublishedListings(), listMyListings(userId), listPurchases(userId)])
-            setListings(published)
-            setMyListings(mine)
-            setPurchases(bought)
+            const [visible, bought] = await Promise.all([listVisibleListings(), listPurchases(userId)])
+            const byId = new Map(visible.map((listing) => [listing.id, listing]))
+            setListings(visible.filter((listing) => listing.status === 'published'))
+            setMyListings(visible.filter((listing) => listing.sellerId === userId))
+            setPurchases(bought.flatMap((purchase) => { const listing = byId.get(purchase.listingId); return listing ? [{ id: purchase.id, versionId: purchase.versionId, purchasedAt: purchase.purchasedAt, priceCents: purchase.priceCents, listing }] : [] }))
+            setLoading(false)
+            // Only "page" covers need preview content for the card thumbnail.
+            void loadPreviews(visible.filter((listing) => listing.cover === 'page').map((listing) => listing.id))
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : 'Could not load the marketplace.')
-        } finally {
             setLoading(false)
         }
+    }
+
+    async function loadPreviews(ids: string[]) {
+        const missing = ids.filter((listingId) => !previews[listingId])
+        if (!missing.length) return
+        try {
+            const loaded = await loadPreviewPages(missing)
+            setPreviews((previous) => ({ ...previous, ...loaded }))
+        } catch { /* thumbnails fall back to the standard cover */ }
     }
 
     useEffect(() => { void refresh() }, [userId])
@@ -143,6 +156,7 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
         setError('')
     }, [initialLessonId])
 
+    const withPreview = (listing: MarketplaceListing): MarketplaceListing => ({ ...listing, previewPages: previews[listing.id] ?? [] })
     const query = search.trim().toLowerCase()
     const matches = (listing: MarketplaceListing) => !query || `${listing.title} ${listing.sellerName} ${listing.tags.join(' ')}`.toLowerCase().includes(query)
     const browseListings = listings.filter((listing) => listing.sellerId !== userId && matches(listing))
@@ -197,6 +211,7 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
     function openDetail(listing: MarketplaceListing) {
         setDetail(listing)
         setPreviewPage(0)
+        void loadPreviews([listing.id])
     }
 
     function openPublish(existing?: MarketplaceListing, lessonId = '') {
@@ -262,9 +277,9 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
                 {error && <p className="market-message error" role="alert">{error}</p>}
                 {status && <p className="market-message" role="status">{status}</p>}
                 {loading ? <p className="market-empty" role="status">Loading…</p> : <div className="lesson-grid market-grid">
-                    {tab === 'browse' && (browseListings.length ? browseListings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => openDetail(listing)} actions={<>{purchasedIds.has(listing.id) && <span className="market-owned-badge"><Check size={13} /> Owned</span>}<button className="mini" onClick={() => openDetail(listing)}><Eye size={13} /> Preview</button></>} />) : <p className="market-empty">No lessons found.</p>)}
-                    {tab === 'owned' && (purchases.filter((purchase) => matches(purchase.listing)).length ? purchases.filter((purchase) => matches(purchase.listing)).map((purchase) => <ListingCard key={purchase.id} listing={purchase.listing} onOpen={() => void openOwned(purchase)} actions={<button className="mini primary" disabled={busyId === purchase.id} onClick={() => void openOwned(purchase)}>{busyId === purchase.id ? 'Opening…' : 'Open'}</button>} />) : <p className="market-empty">You haven’t purchased anything yet.</p>)}
-                    {tab === 'selling' && (myListings.length ? myListings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => openDetail(listing)} actions={<><span className={`market-owned-badge ${listing.status}`}>{listing.status === 'published' ? 'Live' : 'Hidden'}</span><button className="mini" disabled={busyId === listing.id} onClick={() => void toggleListing(listing)}>{listing.status === 'published' ? 'Unpublish' : 'Publish'}</button><button className="mini" onClick={() => openPublish(listing)}>New version</button></>} />) : <p className="market-empty">You haven’t published anything yet.</p>)}
+                    {tab === 'browse' && (browseListings.length ? browseListings.map((listing) => <ListingCard key={listing.id} listing={withPreview(listing)} onOpen={() => openDetail(listing)} actions={<>{purchasedIds.has(listing.id) && <span className="market-owned-badge"><Check size={13} /> Owned</span>}<button className="mini" onClick={() => openDetail(listing)}><Eye size={13} /> Preview</button></>} />) : <p className="market-empty">No lessons found.</p>)}
+                    {tab === 'owned' && (purchases.filter((purchase) => matches(purchase.listing)).length ? purchases.filter((purchase) => matches(purchase.listing)).map((purchase) => <ListingCard key={purchase.id} listing={withPreview(purchase.listing)} onOpen={() => void openOwned(purchase)} actions={<button className="mini primary" disabled={busyId === purchase.id} onClick={() => void openOwned(purchase)}>{busyId === purchase.id ? 'Opening…' : 'Open'}</button>} />) : <p className="market-empty">You haven’t purchased anything yet.</p>)}
+                    {tab === 'selling' && (myListings.length ? myListings.map((listing) => <ListingCard key={listing.id} listing={withPreview(listing)} onOpen={() => openDetail(listing)} actions={<><span className={`market-owned-badge ${listing.status}`}>{listing.status === 'published' ? 'Live' : 'Hidden'}</span><button className="mini" disabled={busyId === listing.id} onClick={() => void toggleListing(listing)}>{listing.status === 'published' ? 'Unpublish' : 'Publish'}</button><button className="mini" onClick={() => openPublish(listing)}>New version</button></>} />) : <p className="market-empty">You haven’t published anything yet.</p>)}
                 </div>}
             </main>
 
@@ -273,10 +288,10 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
                 <h2>{detail.title}</h2>
                 <p>by {detail.sellerName || 'SkyBoard teacher'} · {detail.pageCount} page{detail.pageCount === 1 ? '' : 's'}</p>
                 <p className="market-description">{detail.description || 'No description provided.'}</p>
-                {detail.previewPages[previewPage] ? <>
-                    <PagePreview page={detail.previewPages[previewPage]} />
-                    <div className="market-pager"><button className="mini icon" aria-label="Previous preview page" title="Previous page" disabled={previewPage === 0} onClick={() => setPreviewPage((page) => page - 1)}><ChevronLeft size={15} /></button><span>{detail.previewPages[previewPage].name} · {previewPage + 1} / {detail.previewPages.length}</span><button className="mini icon" aria-label="Next preview page" title="Next page" disabled={previewPage >= detail.previewPages.length - 1} onClick={() => setPreviewPage((page) => page + 1)}><ChevronRight size={15} /></button></div>
-                    <p className="market-note">Previewing {detail.previewPages.length} of {detail.pageCount} page{detail.pageCount === 1 ? '' : 's'}. Full-quality images and PDFs are included after purchase.</p>
+                {!previews[detail.id] ? <p className="market-note" role="status">Loading preview…</p> : previews[detail.id][previewPage] ? <>
+                    <PagePreview page={previews[detail.id][previewPage]} />
+                    <div className="market-pager"><button className="mini icon" aria-label="Previous preview page" title="Previous page" disabled={previewPage === 0} onClick={() => setPreviewPage((page) => page - 1)}><ChevronLeft size={15} /></button><span>{previews[detail.id][previewPage].name} · {previewPage + 1} / {previews[detail.id].length}</span><button className="mini icon" aria-label="Next preview page" title="Next page" disabled={previewPage >= previews[detail.id].length - 1} onClick={() => setPreviewPage((page) => page + 1)}><ChevronRight size={15} /></button></div>
+                    <p className="market-note">Previewing {previews[detail.id].length} of {detail.pageCount} page{detail.pageCount === 1 ? '' : 's'}. Full-quality images and PDFs are included after purchase.</p>
                 </> : <p className="market-note">No preview is available for this lesson.</p>}
                 <div className="new-lesson-actions"><span className={`market-price ${detail.priceCents === 0 ? 'free' : ''}`}>{formatPrice(detail.priceCents)}</span>
                     {detail.sellerId === userId ? null : purchasedIds.has(detail.id) ? <button className="confirm-button" onClick={() => { const purchase = purchases.find((candidate) => candidate.listing.id === detail.id); setDetail(null); if (purchase) void openOwned(purchase) }}><PackageCheck size={15} /> Already owned — open</button> : <button className="confirm-button" disabled={busyId === detail.id} onClick={() => void buy(detail)}>{busyId === detail.id ? 'Processing…' : detail.priceCents === 0 ? 'Get for free' : `Buy for ${formatPrice(detail.priceCents)}`}</button>}

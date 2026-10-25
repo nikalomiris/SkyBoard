@@ -25,11 +25,11 @@ export type MarketplacePurchase = { id: string; versionId: string; purchasedAt: 
 export type MarketplacePage = { name: string; background?: string; items: BoardItem[] }
 export type MarketplaceVersion = { id: string; title: string; color: string; cover?: Lesson['cover']; coverImage?: string; tags: string[]; cardDeck?: CardDeckConfig; pages: MarketplacePage[] }
 
-type ListingRow = { id: string; seller_id: string; seller_name: string; title: string; description: string; price_cents: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; page_count: number; preview_pages: StoredPage[] | null; status: 'published' | 'unpublished'; updated_at: string }
+type ListingRow = { id: string; seller_id: string; seller_name: string; title: string; description: string; price_cents: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; page_count: number; status: 'published' | 'unpublished'; updated_at: string }
 type StoredPage = { name: string; background?: string; elements: BoardItem[] }
 type VersionRow = { id: string; title: string; color: string; cover: string | null; cover_image: string | null; tags: string[]; card_deck: CardDeckConfig | null; pages: StoredPage[] }
 
-const listingColumns = 'id,seller_id,seller_name,title,description,price_cents,cover,cover_image,color,tags,page_count,preview_pages,status,updated_at'
+const listingColumns = 'id,seller_id,seller_name,title,description,price_cents,cover,cover_image,color,tags,page_count,status,updated_at'
 
 function getClient() {
     if (!supabase) throw new Error('The marketplace needs Supabase to be configured.')
@@ -49,7 +49,7 @@ function toListing(row: ListingRow): MarketplaceListing {
         color: row.color,
         tags: row.tags ?? [],
         pageCount: row.page_count,
-        previewPages: (row.preview_pages ?? []).map((page) => ({ name: page.name, background: page.background, items: page.elements })),
+        previewPages: [],
         status: row.status,
         updatedAt: new Date(row.updated_at).getTime(),
     }
@@ -59,28 +59,25 @@ export function formatPrice(priceCents: number) {
     return priceCents === 0 ? 'Free' : new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(priceCents / 100)
 }
 
-export async function listPublishedListings(): Promise<MarketplaceListing[]> {
-    const result = await getClient().from('marketplace_listings').select(listingColumns).eq('status', 'published').order('updated_at', { ascending: false })
+// One light query: row-level security already limits this to published, own and purchased listings.
+export async function listVisibleListings(): Promise<MarketplaceListing[]> {
+    const result = await getClient().from('marketplace_listings').select(listingColumns).order('updated_at', { ascending: false })
     if (result.error) throw new Error(result.error.message)
     return (result.data as ListingRow[]).map(toListing)
 }
 
-export async function listMyListings(userId: string): Promise<MarketplaceListing[]> {
-    const result = await getClient().from('marketplace_listings').select(listingColumns).eq('seller_id', userId).order('updated_at', { ascending: false })
+export async function listPurchases(userId: string): Promise<{ id: string; listingId: string; versionId: string; purchasedAt: number; priceCents: number }[]> {
+    const result = await getClient().from('marketplace_purchases').select('id,listing_id,version_id,price_cents,created_at').eq('buyer_id', userId).order('created_at', { ascending: false })
     if (result.error) throw new Error(result.error.message)
-    return (result.data as ListingRow[]).map(toListing)
+    return (result.data as { id: string; listing_id: string; version_id: string; price_cents: number; created_at: string }[]).map((row) => ({ id: row.id, listingId: row.listing_id, versionId: row.version_id, purchasedAt: new Date(row.created_at).getTime(), priceCents: row.price_cents }))
 }
 
-export async function listPurchases(userId: string): Promise<MarketplacePurchase[]> {
-    const result = await getClient().from('marketplace_purchases').select(`id,version_id,price_cents,created_at,listing:marketplace_listings(${listingColumns})`).eq('buyer_id', userId).order('created_at', { ascending: false })
+// Previews hold embedded images, so they load separately from the listing grid.
+export async function loadPreviewPages(listingIds: string[]): Promise<Record<string, MarketplacePage[]>> {
+    if (!listingIds.length) return {}
+    const result = await getClient().from('marketplace_listings').select('id,preview_pages').in('id', listingIds)
     if (result.error) throw new Error(result.error.message)
-    return (result.data as unknown as { id: string; version_id: string; price_cents: number; created_at: string; listing: ListingRow }[]).map((row) => ({
-        id: row.id,
-        versionId: row.version_id,
-        purchasedAt: new Date(row.created_at).getTime(),
-        priceCents: row.price_cents,
-        listing: toListing(row.listing),
-    }))
+    return Object.fromEntries((result.data as { id: string; preview_pages: StoredPage[] | null }[]).map((row) => [row.id, (row.preview_pages ?? []).map((page) => ({ name: page.name, background: page.background, items: page.elements }))]))
 }
 
 export async function purchaseListing(listingId: string) {
