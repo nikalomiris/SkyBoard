@@ -5864,3 +5864,29 @@ button.deck-chip.selected {
     margin: 0;
     flex: none;
 }
+
+/* Marketplace */
+.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px; padding: 8px 0 32px; }
+.market-card { display: flex; flex-direction: column; border: 1px solid #e3e0d4; border-radius: 14px; background: #fff; overflow: hidden; }
+.market-card-cover { all: unset; display: block; height: 140px; cursor: pointer; overflow: hidden; }
+.market-card-cover:disabled { cursor: default; }
+.market-card-cover img { width: 100%; height: 100%; object-fit: cover; }
+.market-card-cover .lesson-thumb { width: 100%; height: 100%; border-radius: 0; }
+.market-card-body { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px 14px; }
+.market-card-meta { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #6f7a73; }
+.market-card-footer { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.market-card-footer .market-price { margin-right: auto; }
+.market-price { font-weight: 700; color: #2f4a3d; }
+.market-price.free { color: #3f7d5a; }
+.market-owned-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; color: #3f7d5a; }
+.market-owned-badge.unpublished { color: #8a7a55; }
+.market-empty { grid-column: 1 / -1; color: #6f7a73; padding: 24px 0; }
+.market-message { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: #eaf4ee; color: #2f4a3d; font-size: 14px; }
+.market-message.error { background: #fbeaea; color: #9b2c2c; }
+.market-modal { max-width: 560px; width: 92vw; }
+.market-owned-modal { max-width: 760px; }
+.market-description { white-space: pre-wrap; }
+.market-note { font-size: 12px; color: #6f7a73; }
+.market-page-preview { aspect-ratio: 1000 / 620; border: 1px solid #e3e0d4; border-radius: 10px; overflow: hidden; }
+.market-page-preview svg { width: 100%; height: 100%; display: block; }
+.market-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 8px 0; font-size: 13px; }

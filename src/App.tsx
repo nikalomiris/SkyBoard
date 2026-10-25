@@ -6,7 +6,7 @@ import {
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
-    Crop, Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
+    Crop, Layers, Store, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
@@ -15,12 +15,14 @@ import type { DeckSession } from './components/CardDeck'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
+import Marketplace from './components/Marketplace'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
+import type { MarketplacePage, MarketplaceVersion } from './lib/marketplaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
     folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
@@ -76,6 +78,7 @@ function App() {
     const [authSession, setAuthSession] = useState<Session | null>(null)
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
     const [showProfileSettings, setShowProfileSettings] = useState(false)
+    const [showMarketplace, setShowMarketplace] = useState(false)
     const [profileDisplayName, setProfileDisplayName] = useState('')
     const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null)
     const [workspaceReady, setWorkspaceReady] = useState(() => !isSupabaseConfigured || studentView)
@@ -932,6 +935,21 @@ function App() {
         setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
         setLessons((previous) => [copy, ...previous])
         setCopyingLessonId(null)
+    }
+
+    function addPurchasedLesson(version: MarketplaceVersion, purchasedPages: MarketplacePage[], destinationFolder: string) {
+        const folder = destinationFolder || 'Marketplace'
+        const copy: Lesson = { id: id(), title: version.title, folder, pages: purchasedPages.map((page) => page.name), updated: 'Just now', updatedAt: Date.now(), color: version.color, cover: version.cover, coverImage: version.coverImage, tags: version.tags, cardDeck: version.cardDeck, kind: 'lesson' }
+        const newItems: PageItems = {}
+        const newBackgrounds: Record<string, string> = {}
+        purchasedPages.forEach((page, index) => {
+            if (page.items.length) newItems[`${copy.id}:${index}`] = structuredClone(page.items)
+            if (page.background) newBackgrounds[`${copy.id}:${index}`] = page.background
+        })
+        if (!folders.includes(folder)) setFolders((previous) => [...previous, folder])
+        setItemsByPage((previous) => ({ ...previous, ...newItems }))
+        setBackgroundsByPage((previous) => ({ ...previous, ...newBackgrounds }))
+        setLessons((previous) => [copy, ...previous])
     }
 
     function deleteLesson(lessonId: string) {
@@ -2066,7 +2084,7 @@ function App() {
     return (
         <div className="app-shell">
             <header className="topbar">
-                <button className="brand" onClick={() => !studentView && setOpenLesson(null)} aria-label="Go to SkyBoard home"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></button>
+                <button className="brand" onClick={() => { if (!studentView) { setOpenLesson(null); setShowMarketplace(false) } }} aria-label="Go to SkyBoard home"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></button>
                 <div className="topbar-center"><span className={`workspace-dot ${authSession && !studentView ? cloudSaveStatus : 'saved'}`} role="status" title={authSession && !studentView ? (cloudSaveStatus === 'saving' ? 'Saving…' : cloudSaveStatus === 'error' ? `Not saved: ${cloudSaveError}` : 'All changes saved') : 'All changes saved'} aria-label="Save status" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : <span className="crumb-current">My workspace</span>}</div>
                 <div className="topbar-actions">
                     {openLesson ? <>
@@ -2106,12 +2124,15 @@ function App() {
                 </section>
             )}
 
-            {!openLesson ? (
+            {!openLesson && showMarketplace && authSession && !studentView ? (
+                <Marketplace userId={authSession.user.id} lessons={lessons} folders={folders} itemsByPage={itemsByPage} backgroundsByPage={backgroundsByPage} onClose={() => setShowMarketplace(false)} onAddToWorkspace={addPurchasedLesson} />
+            ) : !openLesson ? (
                 <div className="library-layout">
                     <aside className="sidebar">
                         <button className="create-primary" onClick={addLessonFromToolbar}><Plus size={17} /> New lesson <ChevronDown size={14} /></button>
                         <button className={`nav-item ${activeFolder === 'All lessons' ? 'active' : ''}`} onClick={() => setActiveFolder('All lessons')}><LayoutGrid size={17} /> All lessons <span className="nav-count">{lessons.length}</span></button>
                         <button className={`nav-item ${activeFolder === 'Shared with me' ? 'active' : ''}`} onClick={() => setActiveFolder('Shared with me')}><Users size={17} /> Shared with me</button>
+                        {isSupabaseConfigured && authSession && <button className="nav-item" onClick={() => setShowMarketplace(true)}><Store size={17} /> Marketplace</button>}
                         <div className="nav-section-heading"><span>My Students</span><button onClick={startNewFolder} aria-label="Create student folder" title="Create student folder"><FolderPlus size={16} /></button></div>
                         <nav className="folder-list">
                             {orderedFolders.map((folder, index) => {
