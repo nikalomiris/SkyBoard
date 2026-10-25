@@ -71,12 +71,12 @@ export default function ImageCropDialog({ src, label, remaining, editing, onConf
             const sx = Math.round(rect.x * image.naturalWidth), sy = Math.round(rect.y * image.naturalHeight)
             const sw = Math.max(1, Math.round(rect.w * image.naturalWidth)), sh = Math.max(1, Math.round(rect.h * image.naturalHeight))
             if (sw === image.naturalWidth && sh === image.naturalHeight && src.startsWith('data:')) { onConfirm(src); return }
-            const scale = Math.min(1, 2400 / Math.max(sw, sh))
+            const scale = Math.min(1, 1920 / Math.max(sw, sh))
             const canvas = document.createElement('canvas')
             canvas.width = Math.max(1, Math.round(sw * scale))
             canvas.height = Math.max(1, Math.round(sh * scale))
             canvas.getContext('2d')!.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
-            onConfirm(canvas.toDataURL('image/png'))
+            onConfirm(canvas.toDataURL(/^data:image\/png/.test(src) ? 'image/png' : 'image/jpeg', 0.85))
         } catch {
             setError('This image cannot be cropped because its website blocks it. Close this dialog to keep the original.')
             setBusy(false)

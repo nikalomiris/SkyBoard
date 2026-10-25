@@ -1760,7 +1760,10 @@ function App() {
         const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'))
         input.value = ''
         if (!files.length) return
-        const readFile = (file: File) => new Promise<string>((resolve, reject) => {
+        const readFile = (file: File) => file.type.startsWith('image/') && file.type !== 'image/svg+xml' && file.size > 300 * 1024
+            ? downscaleImage(file).catch(() => readOriginal(file))
+            : readOriginal(file)
+        const readOriginal = (file: File) => new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
             reader.onload = () => resolve(String(reader.result))
             reader.onerror = () => reject(reader.error)
