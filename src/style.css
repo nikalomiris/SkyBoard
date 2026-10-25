@@ -5826,3 +5826,7 @@ button.deck-chip.selected {
     margin: 0;
     flex: none;
 }
+
+.deck-canvas {
+    position: relative;
+}

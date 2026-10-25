@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Lock, Play, Unlock, X } from 'lucide-react'
 import { advancedVowelGroups, affixRootGroups, digraphTiles, gluedSoundTiles, initialFinalBlendRows, letterTiles } from './BlendingBoard'
 import type { BoardItem, CardDeckConfig, DeckTile } from '../lib/workspaceTypes'
 
-export type DeckSession = { order: DeckTile[]; index: number }
+export type DeckSession = { order: DeckTile[]; index: number; review?: boolean }
 export const emptyDeckSession: DeckSession = { order: [], index: -1 }
 
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
@@ -79,6 +79,7 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
 }) {
     const [draft, setDraft] = useState<DeckTile[]>(() => config?.tiles ?? [])
     const ready = Boolean(config?.ready)
+    const reviewing = Boolean(session.review)
     const current = readOnly ? tile ?? null : session.order[session.index] ?? null
     const selectedKeys = new Set((ready ? config?.tiles ?? [] : draft).map(deckTileKey))
     const shownKeys = new Set(session.order.slice(0, session.index + 1).map(deckTileKey))
@@ -98,6 +99,11 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
     }
     const canGoNext = session.index >= 0 && session.index < session.order.length - 1
     const canGoBack = session.index > 0
+    const atLastCard = session.index >= 0 && session.index === session.order.length - 1
+    function reviewTile(target: DeckTile) {
+        const position = session.order.findIndex((item) => deckTileKey(item) === deckTileKey(target))
+        if (position >= 0) onSessionChange?.({ ...session, index: position })
+    }
 
     const stage = current
         ? <div className={`deck-card ${deckTileClass(current)}`} aria-live="polite" aria-label={`Card ${current.text}`}>{current.text}</div>
@@ -115,7 +121,9 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
             <div className="deck-split">
                 <aside className="deck-tiles" aria-label="Selected tiles">
                     <div className="deck-tile-list">
-                        {(config?.tiles ?? []).map((item) => <span key={deckTileKey(item)} className={`deck-chip ${deckTileClass(item)}${shownKeys.has(deckTileKey(item)) ? ' shown' : ''}`}>{item.text}</span>)}
+                        {(config?.tiles ?? []).map((item) => reviewing
+                            ? <button key={deckTileKey(item)} type="button" className={`deck-chip ${deckTileClass(item)}${current && deckTileKey(current) === deckTileKey(item) ? ' selected' : ''}`} aria-pressed={Boolean(current && deckTileKey(current) === deckTileKey(item))} title={`Show ${item.text}`} onClick={() => reviewTile(item)}>{item.text}</button>
+                            : <span key={deckTileKey(item)} className={`deck-chip ${deckTileClass(item)}${shownKeys.has(deckTileKey(item)) ? ' shown' : ''}`}>{item.text}</span>)}
                     </div>
                 </aside>
                 <section className="deck-canvas" aria-label="Card canvas">
@@ -124,10 +132,14 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
             </div>
             <div className="deck-bar">
                 <span className="deck-bar-note"><button className="deck-unlock" title="Unlock the deck to change the selected tiles" onClick={() => { onSessionChange?.(emptyDeckSession); onConfigChange?.({ tiles: config?.tiles ?? [], ready: false }) }}><Unlock size={14} /> Unlock to edit</button></span>
-                <button disabled={!canGoBack} onClick={() => onSessionChange?.({ ...session, index: session.index - 1 })}><ChevronLeft size={17} /> Previous</button>
+                <button disabled={!canGoBack || reviewing} onClick={() => onSessionChange?.({ ...session, index: session.index - 1 })}><ChevronLeft size={17} /> Previous</button>
                 <button className="primary" onClick={start} disabled={!config?.tiles.length}><Play size={15} /> {session.index >= 0 ? 'Restart' : 'Start'}</button>
-                <button disabled={!canGoNext} onClick={() => onSessionChange?.({ ...session, index: session.index + 1 })}>Next <ChevronRight size={17} /></button>
-                <span className="deck-bar-note deck-bar-end" role="status">{session.index >= 0 ? `Card ${session.index + 1} of ${session.order.length}` : ''}</span>
+                {reviewing
+                    ? <button className="primary" onClick={() => { onSessionChange?.(emptyDeckSession); onClose() }}>Finish and close</button>
+                    : atLastCard
+                        ? <button className="primary" onClick={() => onSessionChange?.({ ...session, review: true })}>Review</button>
+                        : <button disabled={!canGoNext} onClick={() => onSessionChange?.({ ...session, index: session.index + 1 })}>Next <ChevronRight size={17} /></button>}
+                <span className="deck-bar-note deck-bar-end" role="status">{reviewing ? 'Review mode' : session.index >= 0 ? `Card ${session.index + 1} of ${session.order.length}` : ''}</span>
             </div>
         </div> : <div className="deck-prep">
             <div className="deck-prep-groups">
