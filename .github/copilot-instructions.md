@@ -36,3 +36,10 @@
 - Reuse the established CSS classes in `src/style.css` and Lucide icons from `lucide-react`.
 - Modal dialogs use the existing `modal-scrim` pattern with `aria-modal="true"`. Forms use controlled inputs, busy/error/success state, disabled submissions while pending, and inline `role="alert"` or `role="status"` feedback.
 - Toolbar and pointer-driven controls provide `aria-label` and `title`; mutually exclusive controls use the existing radio semantics. Student/read-only mode must suppress edit handlers, not merely hide editing affordances.
+
+## Branching strategy
+
+- `main` is production-only; it changes only through a release merge from `develop`.
+- `develop` is the integration branch and runs ahead of `main` between releases.
+- Create all `feature/*`, `bugfix/*`, and similar work branches from `develop`, and open their pull requests against `develop`.
+- A production release is a merge (PR) from `develop` into `main`.
