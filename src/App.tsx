@@ -1901,9 +1901,14 @@ function App() {
     }
 
     function exportPdf() {
+        const originalTitle = document.title
+        if (openLesson?.title.trim()) document.title = openLesson.title.trim()
         setPrinting(true)
         window.setTimeout(() => window.print(), 80)
-        window.addEventListener('afterprint', () => setPrinting(false), { once: true })
+        window.addEventListener('afterprint', () => {
+            document.title = originalTitle
+            setPrinting(false)
+        }, { once: true })
     }
 
     function addLessonFromToolbar() {
