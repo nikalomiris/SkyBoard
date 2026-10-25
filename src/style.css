@@ -1739,7 +1739,9 @@ kbd {
 
 .page-directory-anchor {
     position: relative;
-    margin-left: 8px;
+    flex: none;
+    display: flex;
+    align-items: center;
 }
 
 .page-directory-button {
@@ -1768,7 +1770,6 @@ kbd {
     overflow-y: auto;
     padding: 8px;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     border: 1px solid color-mix(in srgb, var(--accent) 15%, white);
     border-radius: 7px;
@@ -1776,12 +1777,10 @@ kbd {
     box-shadow: 0 8px 26px color-mix(in srgb, color-mix(in srgb, var(--accent) 69%, black) 11%, transparent);
 }
 
-.page-directory-menu button {
+.page-directory-main {
+    width: 100%;
     min-width: 0;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    justify-items: center;
-    align-items: center;
     gap: 4px;
     padding: 6px;
     border: 1px solid transparent;
@@ -1792,7 +1791,7 @@ kbd {
     text-align: left;
 }
 
-.page-directory-menu button:hover {
+.page-directory-main:hover {
     background: color-mix(in srgb, var(--accent) 7%, white);
 }
 
@@ -1829,19 +1828,19 @@ kbd {
     white-space: nowrap;
 }
 
-.page-directory-menu button.active .page-directory-thumb {
+.page-directory-item.active .page-directory-thumb {
     border-color: color-mix(in srgb, var(--accent) 85%, white);
     box-shadow: 0 0 0 2px color-mix(in srgb, color-mix(in srgb, var(--accent) 85%, white) 20%, transparent);
 }
 
-.page-directory-menu button.active {
+.page-directory-item.active {
     border-color: color-mix(in srgb, var(--accent) 23%, white);
     background: color-mix(in srgb, var(--accent) 8%, white);
-    color: color-mix(in srgb, var(--accent) 90%, black);
     font-weight: 600;
 }
 
 .board-toolbar-right {
+    grid-column: 3;
     justify-self: end;
     display: flex;
     align-items: center;
@@ -2541,64 +2540,6 @@ kbd {
     stroke-dasharray: 3 3;
 }
 
-.page-dock {
-    min-height: 40px;
-    flex: 0 0 40px;
-    margin: 0 -28px;
-    padding: 0 29px;
-    display: flex;
-    justify-content: space-between;
-    align-items: stretch;
-    border-top: 1px solid color-mix(in srgb, var(--accent) 16%, white);
-    background: #fff;
-}
-
-.page-tabs {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    align-items: stretch;
-    gap: 3px;
-    overflow-x: auto;
-}
-
-.page-tab {
-    position: relative;
-    flex: none;
-    min-width: 100px;
-    max-width: 160px;
-    padding: 0 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: color-mix(in srgb, var(--accent) 68%, white);
-    font-size: 12px;
-    white-space: nowrap;
-}
-
-.page-tab[draggable="true"] {
-    cursor: grab;
-}
-
-.page-tab[draggable="true"]:active {
-    cursor: grabbing;
-}
-
-.page-tab.active {
-    border-bottom-color: color-mix(in srgb, var(--accent) 85%, white);
-    color: color-mix(in srgb, var(--accent) 90%, black);
-    font-weight: 700;
-    background: color-mix(in srgb, var(--accent) 3%, white);
-}
-
-.page-tab.selected-for-deletion {
-    background: color-mix(in srgb, #d94b4b 8%, white);
-    color: color-mix(in srgb, #b73535 88%, black);
-}
-
 .page-selection-indicator {
     flex: none;
     width: 15px;
@@ -2611,7 +2552,7 @@ kbd {
     background: white;
 }
 
-.page-tab.selected-for-deletion .page-selection-indicator {
+.page-directory-item.selected-for-deletion .page-selection-indicator {
     border-color: #c74444;
     background: #c74444;
 }
@@ -2621,41 +2562,19 @@ kbd {
     font: 12px var(--font-ui);
 }
 
-.page-tab.active .page-number {
-    color: color-mix(in srgb, var(--accent) 79%, white);
-}
-
-.insert-page-tab {
-    flex: none;
-    align-self: center;
-    width: 20px;
-    height: 20px;
-    display: grid;
-    place-items: center;
-    border: 0;
-    border-radius: 50%;
-    background: transparent;
-    color: color-mix(in srgb, var(--accent) 58%, white);
-    cursor: pointer;
-}
-
-.insert-page-tab:hover {
-    background: color-mix(in srgb, var(--accent) 9%, white);
-    color: color-mix(in srgb, var(--accent) 90%, black);
-}
-
-.page-dock-actions {
-    flex: none;
-    margin-left: 12px;
-    white-space: nowrap;
+.page-directory-actions {
+    grid-column: 1 / -1;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 5px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 12%, white);
     color: color-mix(in srgb, var(--accent) 58%, white);
     font: 12px var(--font-ui);
 }
 
-.page-dock-actions button {
+.page-directory-actions button {
     flex: none;
     width: 28px;
     height: 28px;
@@ -2667,14 +2586,13 @@ kbd {
     color: color-mix(in srgb, var(--accent) 66%, white);
 }
 
-.page-dock-actions button:hover {
+.page-directory-actions button:hover:not(:disabled) {
     color: color-mix(in srgb, var(--accent) 100%, white);
     background: color-mix(in srgb, var(--accent) 8%, white);
 }
 
-.page-dock-actions .page-selection-action {
+.page-directory-actions .page-selection-action {
     width: auto;
-    min-width: 0;
     padding: 0 8px;
     display: flex;
     align-items: center;
@@ -2683,20 +2601,83 @@ kbd {
     font: inherit;
 }
 
-.page-dock-actions .delete-selected-pages {
+.page-directory-actions .delete-selected-pages {
     color: #b73535;
 }
 
-.page-dock-actions .delete-selected-pages:disabled {
+.page-directory-actions .delete-selected-pages:disabled {
     cursor: not-allowed;
     opacity: 0.45;
 }
 
-.dock-separator {
-    width: 1px;
-    height: 18px;
-    margin: 0 8px;
-    background: color-mix(in srgb, var(--accent) 14%, white);
+.page-directory-grid {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.page-directory-item {
+    position: relative;
+    min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 6px;
+}
+
+.page-directory-item[draggable="true"] {
+    cursor: grab;
+}
+
+.page-directory-item.dragging {
+    opacity: 0.45;
+}
+
+.page-directory-item.selected-for-deletion {
+    background: color-mix(in srgb, #d94b4b 8%, white);
+}
+
+.page-directory-rename {
+    padding: 0 6px 6px;
+}
+
+.page-directory-rename .page-rename-input {
+    width: 100%;
+    min-width: 0;
+}
+
+.page-insert-before,
+.page-insert-after {
+    position: absolute;
+    top: 6px;
+    width: 22px;
+    height: 22px;
+    display: none;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--accent) 85%, black);
+    color: #fff;
+    cursor: pointer;
+}
+
+.page-insert-before {
+    left: 6px;
+}
+
+.page-insert-after {
+    right: 6px;
+}
+
+.page-directory-item:hover .page-insert-before,
+.page-directory-item:hover .page-insert-after,
+.page-insert-before:focus-visible,
+.page-insert-after:focus-visible {
+    display: grid;
+}
+
+.page-directory-menu .page-insert-before,
+.page-directory-menu .page-insert-after {
+    padding: 0;
 }
 
 .background-panel {
@@ -3663,11 +3644,6 @@ kbd {
     .canvas-workspace {
         padding: 18px 18px 0;
     }
-
-    .page-dock {
-        margin: 0 -18px;
-        padding: 0 19px;
-    }
 }
 
 @media (max-width: 720px) {
@@ -3982,30 +3958,8 @@ kbd {
         width: min(100%, 1030px, calc(100cqh * 1.6129));
     }
 
-    .page-dock {
-        min-height: 40px;
-        flex-basis: 40px;
-        margin: 0 -9px;
-        padding: 0 7px;
-    }
-
-    .page-tab {
-        min-width: 72px;
-        padding: 0 7px;
-        font-size: 11px;
-    }
-
-    .page-dock-actions {
-        gap: 0;
-        font-size: 11px;
-    }
-
-    .page-dock-actions button {
-        width: 25px;
-    }
-
-    .dock-separator {
-        margin: 0 4px;
+    .page-directory-menu {
+        width: min(380px, calc(100vw - 16px));
     }
 
     .background-panel {
@@ -4023,7 +3977,6 @@ kbd {
     .topbar,
     .tool-rail,
     .board-toolbar,
-    .page-dock,
     .background-panel,
     .blending-board,
     .card-deck,
