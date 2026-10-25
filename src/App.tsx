@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
@@ -601,9 +601,6 @@ function App() {
     useEffect(() => {
         try { window.localStorage.setItem('skyboard:page-clipboard', JSON.stringify(clipboardPages)) } catch { /* clipboard stays in memory only */ }
     }, [clipboardPages])
-    useEffect(() => {
-        document.querySelector('.page-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-    }, [pageIndex, pages.length])
     useEffect(() => {
         function syncClipboard(event: StorageEvent) {
             if (event.key === 'skyboard:page-clipboard') setClipboardPages(readStored<ClipboardPage[]>('skyboard:page-clipboard', []))
@@ -2222,20 +2219,56 @@ function App() {
                     <main className="board-main">
                         <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
                             <div className="board-title"><div className="board-title-icon"><NotebookTabs size={17} /></div><div>{renamingTitle ? <input className="board-title-input" autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} onBlur={commitOpenLessonTitleRename} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitOpenLessonTitleRename() } if (event.key === 'Escape') cancelOpenLessonTitleRename() }} /> : <strong onDoubleClick={startRenameOpenLessonTitle}>{openLesson.title}</strong>}<span>{openLesson.folder} <span className="meta-dot">·</span> Saved just now</span></div>{!studentView && <button className="title-dropdown" aria-label="Rename lesson" title="Rename lesson" onClick={startRenameOpenLessonTitle}><Pencil size={15} /></button>}</div>
-                            {!studentView && <div className="page-directory-anchor">
+                            {!studentView ? <div className="page-directory-anchor">
                                 <div className="page-nav">
                                     <button className="page-nav-step" aria-label="Previous page" title="Previous page" disabled={pageIndex <= 0} onClick={() => { setPageIndex(pageIndex - 1); setSelectedItemId(null) }}><ChevronLeft size={16} /></button>
-                                    <button className="page-directory-button" aria-label="Browse pages" title="Browse pages" onClick={() => setShowPageDirectory(!showPageDirectory)}>{pageIndex + 1}/{pages.length}</button>
+                                    <button className="page-directory-button" aria-label="Browse and manage pages" title="Browse and manage pages" aria-expanded={showPageDirectory} onClick={() => setShowPageDirectory(!showPageDirectory)}>{pageIndex + 1}/{pages.length}</button>
                                     <button className="page-nav-step" aria-label="Next page" title="Next page" disabled={pageIndex >= pages.length - 1} onClick={() => { setPageIndex(pageIndex + 1); setSelectedItemId(null) }}><ChevronRight size={16} /></button>
                                 </div>
-                                {showPageDirectory && openLesson && <div className="page-directory-menu">{pages.map((page, index) => {
-                                    const key = `${openLesson.id}:${index}`
-                                    return <button key={`${page}-${index}`} className={index === pageIndex ? 'active' : ''} title={page} onClick={() => { setPageIndex(index); setSelectedItemId(null); setShowPageDirectory(false) }}>
-                                        <span className="page-directory-thumb" aria-hidden="true" style={{ background: backgroundsByPage[key] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[key] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></span>
-                                        <span className="page-directory-label"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><span className="page-directory-name">{page}</span></span>
-                                    </button>
-                                })}</div>}
-                            </div>}
+                                {showPageDirectory && openLesson && <div className="page-directory-menu">
+                                    <div className="page-directory-actions">
+                                        {pageSelectionMode
+                                            ? <>
+                                                <span>{selectedPageIndices.length} selected</span>
+                                                <button className="page-selection-action" type="button" onClick={cancelPageSelection}>Cancel</button>
+                                                <button className="page-selection-action delete-selected-pages" type="button" onClick={deleteSelectedPages} disabled={selectedPageIndices.length === 0 || selectedPageIndices.length >= pages.length} title={selectedPageIndices.length >= pages.length ? 'At least one page must remain' : 'Delete selected pages'}><Trash2 size={15} /> Delete</button>
+                                            </>
+                                            : <>
+                                                <button type="button" title="Select pages" aria-label="Select pages" onClick={startPageSelection}><Check size={16} /></button>
+                                                <button type="button" title="Rename page" aria-label="Rename page" onClick={() => startRenamePage(pageIndex)}><Pencil size={16} /></button>
+                                                <button type="button" title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button>
+                                                <button type="button" title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button>
+                                                <button type="button" title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button>
+                                                <button type="button" title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button>
+                                                <button type="button" className="page-selection-action" title="Add page" aria-label="Add page" onClick={addPage}><Plus size={15} /> Add page</button>
+                                            </>}
+                                    </div>
+                                    <div className="page-directory-grid">{pages.map((page, index) => {
+                                        const key = `${openLesson.id}:${index}`
+                                        const selected = pageSelectionMode && selectedPageIndices.includes(index)
+                                        return <div key={`${page}-${index}`} className={`page-directory-item${index === pageIndex ? ' active' : ''}${selected ? ' selected-for-deletion' : ''}${draggedPageIndex === index ? ' dragging' : ''}`}
+                                            draggable={!pageSelectionMode && renamingPageIndex !== index}
+                                            onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }}
+                                            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}
+                                            onDrop={(event) => { event.preventDefault(); if (!pageSelectionMode && draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }}
+                                            onDragEnd={() => setDraggedPageIndex(null)}>
+                                            <button type="button" className="page-directory-main" title={pageSelectionMode ? `${selected ? 'Deselect' : 'Select'} ${page}` : `${page} — double-click to rename, drag to reorder`}
+                                                aria-current={index === pageIndex ? 'page' : undefined}
+                                                aria-pressed={pageSelectionMode ? selected : undefined}
+                                                onDoubleClick={() => { if (!pageSelectionMode) startRenamePage(index) }}
+                                                onClick={() => { if (pageSelectionMode) togglePageSelection(index); else { setPageIndex(index); setSelectedItemId(null) } }}>
+                                                <span className="page-directory-thumb" aria-hidden="true" style={{ background: backgroundsByPage[key] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[key] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></span>
+                                                {renamingPageIndex !== index && <span className="page-directory-label">{pageSelectionMode && <span className="page-selection-indicator" aria-hidden="true">{selected && <Check size={12} />}</span>}<span className="page-number">{String(index + 1).padStart(2, '0')}</span><span className="page-directory-name">{page}</span></span>}
+                                            </button>
+                                            {renamingPageIndex === index && <div className="page-directory-label page-directory-rename"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div>}
+                                            {!pageSelectionMode && <>
+                                                <button type="button" className="page-insert-before" onClick={() => insertPage(index, `Page ${index + 1}`, [])} aria-label={`Insert page before ${page}`} title={`Insert page before ${page}`}><Plus size={13} /></button>
+                                                <button type="button" className="page-insert-after" onClick={() => insertPage(index + 1, `Page ${index + 2}`, [])} aria-label={`Insert page after ${page}`} title={`Insert page after ${page}`}><Plus size={13} /></button>
+                                            </>}
+                                        </div>
+                                    })}</div>
+                                </div>}
+                            </div> : <div />}
                             <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
@@ -2322,52 +2355,6 @@ function App() {
                                     <div className="page-corner-label">{openLesson.folder.toUpperCase()} <span>✳</span></div>
                                 </div>
                             </div>
-                            {!studentView && <div className="page-dock">
-                                <div className="page-tabs">
-                                    {pages.map((page, index) => <Fragment key={`${page}-${index}`}>
-                                        {renamingPageIndex === index ? <div className="page-tab active"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div> : <button
-                                        type="button"
-                                        title={pageSelectionMode ? `${selectedPageIndices.includes(index) ? 'Deselect' : 'Select'} ${page}` : 'Double-click to rename'}
-                                        onDoubleClick={() => { if (!pageSelectionMode) startRenamePage(index) }}
-                                        className={`page-tab ${index === pageIndex ? 'active' : ''}${pageSelectionMode && selectedPageIndices.includes(index) ? ' selected-for-deletion' : ''}`}
-                                        draggable={!pageSelectionMode}
-                                        aria-current={index === pageIndex ? 'page' : undefined}
-                                        aria-pressed={pageSelectionMode ? selectedPageIndices.includes(index) : undefined}
-                                        onDragStart={(event) => { setDraggedPageIndex(index); event.dataTransfer.effectAllowed = 'move' }}
-                                        onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }}
-                                        onDrop={(event) => { event.preventDefault(); if (!pageSelectionMode && draggedPageIndex !== null) reorderPage(draggedPageIndex, index); setDraggedPageIndex(null) }}
-                                        onDragEnd={() => setDraggedPageIndex(null)}
-                                        onClick={() => {
-                                            if (pageSelectionMode) togglePageSelection(index)
-                                            else { setPageIndex(index); setSelectedItemId(null) }
-                                        }}
-                                    >
-                                        {pageSelectionMode && <span className="page-selection-indicator" aria-hidden="true">{selectedPageIndices.includes(index) && <Check size={12} />}</span>}
-                                        <span className="page-number">{String(index + 1).padStart(2, '0')}</span>{page}
-                                    </button>}
-                                        {!pageSelectionMode && index < pages.length - 1 && <button className="insert-page-tab" type="button" onClick={() => insertPage(index + 1, `Page ${index + 2}`, [])} aria-label={`Insert page after ${page}`} title={`Insert page after ${page}`}><Plus size={14} /></button>}
-                                    </Fragment>)}
-                                    {!pageSelectionMode && <button className="insert-page-tab" type="button" onClick={addPage} aria-label="Add page" title="Add page"><Plus size={14} /></button>}
-                                </div>
-                                <div className="page-dock-actions">
-                                    {pageSelectionMode
-                                        ? <>
-                                            <span>{selectedPageIndices.length} selected</span>
-                                            <button className="page-selection-action" type="button" onClick={cancelPageSelection}>Cancel</button>
-                                            <button className="page-selection-action delete-selected-pages" type="button" onClick={deleteSelectedPages} disabled={selectedPageIndices.length === 0 || selectedPageIndices.length >= pages.length} title={selectedPageIndices.length >= pages.length ? 'At least one page must remain' : 'Delete selected pages'}><Trash2 size={15} /> Delete</button>
-                                        </>
-                                        : <>
-                                            <button title="Select pages" aria-label="Select pages" onClick={startPageSelection}><Check size={16} /></button>
-                                            <button title="Rename page" aria-label="Rename page" onClick={() => startRenamePage(pageIndex)}><Pencil size={16} /></button>
-                                            <button title="Duplicate page" aria-label="Duplicate page" onClick={duplicatePage}><Copy size={16} /></button>
-                                            <button title="Copy page to clipboard" aria-label="Copy page to clipboard" onClick={copyPage}><ClipboardCopy size={16} /></button>
-                                            <button title="Paste page from clipboard" aria-label="Paste page from clipboard" onClick={() => setShowPasteDialog(true)}><ClipboardPaste size={16} /></button>
-                                            <button title="Delete page" aria-label="Delete page" onClick={deletePage}><Trash2 size={16} /></button>
-                                        </>
-                                    }
-                                    <span className="dock-separator" /><span>{pageIndex + 1} / {pages.length}</span>
-                                </div>
-                            </div>}
                         </div>
                     </main>
                 </div>
