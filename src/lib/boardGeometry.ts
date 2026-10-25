@@ -6,6 +6,7 @@ export type ResizeHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-ri
 
 const BOARD_WIDTH = 1000
 const BOARD_HEIGHT = 620
+export const TEXT_LINE_HEIGHT = 1.2
 
 export function parsePoints(points: string): Point[] {
     return points.trim().split(/\s+/).filter(Boolean).map((point) => point.split(',').map(Number) as Point)
@@ -123,7 +124,11 @@ export function getItemBounds(item: BoardItem): ItemBounds {
         const corners: Point[] = [[left, top], [left + width, top], [left + width, top + height], [left, top + height]]
         return boundsForPoints(corners.map((point) => rotatePoint(point, center, item.rotation ?? 0)))
     }
-    if (item.type === 'text') return { left, top: top - item.size * scale, width: Math.max(32, item.text.length * item.size * 0.62) * scale, height: item.size * 1.5 * scale }
+    if (item.type === 'text') {
+        const lines = item.text.split('\n')
+        const longest = Math.max(...lines.map((line) => line.length))
+        return { left, top: top - item.size * scale, width: Math.max(32, longest * item.size * 0.62) * scale, height: (1.5 + (lines.length - 1) * TEXT_LINE_HEIGHT) * item.size * scale }
+    }
     if (item.type === 'image') {
         const size = getImageSize(item.src)
         return { left, top, width: size.width * scale, height: size.height * scale }

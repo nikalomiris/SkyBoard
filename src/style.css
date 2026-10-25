@@ -2178,7 +2178,13 @@ kbd {
     font-size: 12px;
 }
 
-.grid-text-toolbar>button {
+.text-font-toolbar>button.active {
+    background: color-mix(in srgb, var(--accent) 16%, white);
+    color: color-mix(in srgb, var(--accent) 90%, black);
+}
+
+.grid-text-toolbar>button,
+.text-font-toolbar>button {
     width: 27px;
     height: 27px;
     flex: 0 0 auto;
@@ -2190,7 +2196,8 @@ kbd {
     color: color-mix(in srgb, var(--accent) 85%, white);
 }
 
-.grid-text-toolbar>button:hover {
+.grid-text-toolbar>button:hover,
+.text-font-toolbar>button:hover {
     background: color-mix(in srgb, var(--accent) 9%, white);
     color: color-mix(in srgb, var(--accent) 90%, black);
 }
@@ -2333,7 +2340,9 @@ kbd {
     border-radius: 4px;
     background: #ffffffcc;
     outline: none;
-    white-space: nowrap;
+    resize: none;
+    overflow: hidden;
+    white-space: pre;
 }
 
 .board-image {
