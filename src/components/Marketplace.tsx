@@ -18,6 +18,7 @@ type MarketplaceProps = {
     folders: string[]
     itemsByPage: PageItems
     backgroundsByPage: Record<string, string>
+    initialLessonId?: string
     onClose: () => void
     onAddToWorkspace: (version: MarketplaceVersion, pages: MarketplacePage[], destinationFolder: string) => void
 }
@@ -77,7 +78,7 @@ function ListingCard({ listing, children, onOpen }: { listing: MarketplaceListin
     )
 }
 
-export default function Marketplace({ userId, lessons, folders, itemsByPage, backgroundsByPage, onClose, onAddToWorkspace }: MarketplaceProps) {
+export default function Marketplace({ userId, lessons, folders, itemsByPage, backgroundsByPage, initialLessonId, onClose, onAddToWorkspace }: MarketplaceProps) {
     const [tab, setTab] = useState<Tab>('browse')
     const [search, setSearch] = useState('')
     const [listings, setListings] = useState<MarketplaceListing[]>([])
@@ -116,6 +117,15 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
     }
 
     useEffect(() => { void refresh() }, [userId])
+    useEffect(() => {
+        if (!initialLessonId) return
+        setPublishLessonId(initialLessonId)
+        setRepublishing(null)
+        setPublishDescription('')
+        setPublishPrice('0')
+        setShowPublish(true)
+        setError('')
+    }, [initialLessonId])
 
     const query = search.trim().toLowerCase()
     const matches = (listing: MarketplaceListing) => !query || `${listing.title} ${listing.sellerName} ${listing.tags.join(' ')}`.toLowerCase().includes(query)
@@ -168,9 +178,9 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
         }
     }
 
-    function openPublish(existing?: MarketplaceListing) {
+    function openPublish(existing?: MarketplaceListing, lessonId = '') {
         setRepublishing(existing ?? null)
-        setPublishLessonId('')
+        setPublishLessonId(lessonId)
         setPublishDescription(existing?.description ?? '')
         setPublishPrice(existing ? String(existing.priceCents / 100) : '0')
         setShowPublish(true)

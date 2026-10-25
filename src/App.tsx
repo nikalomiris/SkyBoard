@@ -79,6 +79,7 @@ function App() {
     const [authReady, setAuthReady] = useState(() => !isSupabaseConfigured || studentView)
     const [showProfileSettings, setShowProfileSettings] = useState(false)
     const [showMarketplace, setShowMarketplace] = useState(false)
+    const [marketplaceLessonId, setMarketplaceLessonId] = useState('')
     const [profileDisplayName, setProfileDisplayName] = useState('')
     const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null)
     const [workspaceReady, setWorkspaceReady] = useState(() => !isSupabaseConfigured || studentView)
@@ -950,6 +951,12 @@ function App() {
         setItemsByPage((previous) => ({ ...previous, ...newItems }))
         setBackgroundsByPage((previous) => ({ ...previous, ...newBackgrounds }))
         setLessons((previous) => [copy, ...previous])
+    }
+
+    function openMarketplacePublish(lesson: Lesson) {
+        setMarketplaceLessonId(lesson.id)
+        setOpenLesson(null)
+        setShowMarketplace(true)
     }
 
     function deleteLesson(lessonId: string) {
@@ -2084,8 +2091,8 @@ function App() {
     return (
         <div className="app-shell">
             <header className="topbar">
-                <button className="brand" onClick={() => { if (!studentView) { setOpenLesson(null); setShowMarketplace(false) } }} aria-label="Go to SkyBoard home"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></button>
-                <div className="topbar-center"><span className={`workspace-dot ${authSession && !studentView ? cloudSaveStatus : 'saved'}`} role="status" title={authSession && !studentView ? (cloudSaveStatus === 'saving' ? 'Saving…' : cloudSaveStatus === 'error' ? `Not saved: ${cloudSaveError}` : 'All changes saved') : 'All changes saved'} aria-label="Save status" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : showMarketplace && !studentView ? <><button className="crumb-link" onClick={() => setShowMarketplace(false)}>My workspace</button><ChevronRight size={14} /><span className="crumb-current">Marketplace</span></> : <span className="crumb-current">My workspace</span>}</div>
+                <button className="brand" onClick={() => { if (!studentView) { setOpenLesson(null); setShowMarketplace(false); setMarketplaceLessonId('') } }} aria-label="Go to SkyBoard home"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></button>
+                <div className="topbar-center"><span className={`workspace-dot ${authSession && !studentView ? cloudSaveStatus : 'saved'}`} role="status" title={authSession && !studentView ? (cloudSaveStatus === 'saving' ? 'Saving…' : cloudSaveStatus === 'error' ? `Not saved: ${cloudSaveError}` : 'All changes saved') : 'All changes saved'} aria-label="Save status" />{openLesson ? <>{!studentView && <><button className="crumb-link" onClick={() => setOpenLesson(null)}>My workspace</button><ChevronRight size={14} /></>}<span className="crumb-current">{openLesson.title}</span></> : showMarketplace && !studentView ? <><button className="crumb-link" onClick={() => { setShowMarketplace(false); setMarketplaceLessonId('') }}>My workspace</button><ChevronRight size={14} /><span className="crumb-current">Marketplace</span></> : <span className="crumb-current">My workspace</span>}</div>
                 <div className="topbar-actions">
                     {openLesson ? <>
                         {!studentView && <div className="student-status-wrap"><button className={`icon-button student-status-button ${isFollowing ? 'connected' : ''} ${isFollowing && (studentLocked || lockedInviteIds.length > 0) ? 'locked' : ''} ${waitingInvites.length ? 'waiting' : ''}`} aria-haspopup="menu" aria-expanded={showStudentMenu} aria-label={isFollowing ? 'Student connected' : 'No student connected'} title={waitingInvites.length ? `${waitingInvites.length} waiting to join` : isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'} onClick={() => setShowStudentMenu((open) => !open)}><Users size={17} /><span className="student-status-dot" /></button>{showStudentMenu && <><div className="student-menu-scrim" onClick={() => setShowStudentMenu(false)} /><div className="student-menu" role="menu"><div className="student-menu-status">{!shareSessionId && isSupabaseConfigured ? 'Lesson not shared yet' : isFollowing ? `${studentCount} student${studentCount === 1 ? '' : 's'} connected` : 'No student connected'}</div>
@@ -2094,6 +2101,7 @@ function App() {
                             <button role="menuitem" onClick={() => { setShowStudentMenu(false); openShareDialog() }}><Share2 size={15} />Students &amp; links…</button>
                             <button role="menuitem" disabled={!isFollowing} onClick={() => setStudentLocked(!studentLocked)}>{studentLocked ? <Unlock size={15} /> : <Lock size={15} />}{studentCount > 1 ? (studentLocked ? 'Unlock students' : 'Lock students') : (studentLocked ? 'Unlock student' : 'Lock student')}</button><button role="menuitem" className="danger" disabled={!isFollowing} onClick={() => { setShowStudentMenu(false); void removeAllStudents() }}><UserX size={15} />{studentCount > 1 ? 'Remove students' : 'Remove student'}</button><button role="menuitem" className="danger" disabled={!shareSessionId} onClick={() => { setShowStudentMenu(false); void endLesson() }}><LogOut size={15} />End lesson</button></div></>}</div>}
                         {!studentView && <button className="icon-button" aria-label="Share lesson" title="Share lesson" onClick={openShareDialog}><Share2 size={17} /></button>}
+                        {authSession && isSupabaseConfigured && !studentView && <button className="icon-button" aria-label="Publish lesson to marketplace" title="Publish lesson to marketplace" onClick={() => openMarketplacePublish(openLesson)}><Store size={17} /></button>}
                         {!studentView && <button className="export-button" onClick={exportPdf}><Download size={15} /> Export PDF</button>}
                     </> : authSession && !studentView ? <button className="profile-account" onClick={() => setShowProfileSettings(true)} aria-label="Edit profile settings" title="Profile settings"><span className="avatar">{profileAvatarUrl ? <img src={profileAvatarUrl} alt="" /> : profileDisplayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('')}</span><span className="profile-name">{profileDisplayName || authSession.user.email}</span><MoreHorizontal size={18} /></button> : <><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><button className="more-button" aria-label="Account options"><MoreHorizontal size={19} /></button></>}
                     {authSession && !studentView && <button className="icon-button auth-signout-button" onClick={() => void signOut()} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>}
@@ -2125,14 +2133,14 @@ function App() {
             )}
 
             {!openLesson && showMarketplace && authSession && !studentView ? (
-                <Marketplace userId={authSession.user.id} lessons={lessons} folders={folders} itemsByPage={itemsByPage} backgroundsByPage={backgroundsByPage} onClose={() => setShowMarketplace(false)} onAddToWorkspace={addPurchasedLesson} />
+                <Marketplace userId={authSession.user.id} lessons={lessons} folders={folders} itemsByPage={itemsByPage} backgroundsByPage={backgroundsByPage} initialLessonId={marketplaceLessonId} onClose={() => { setShowMarketplace(false); setMarketplaceLessonId('') }} onAddToWorkspace={addPurchasedLesson} />
             ) : !openLesson ? (
                 <div className="library-layout">
                     <aside className="sidebar">
                         <button className="create-primary" onClick={addLessonFromToolbar}><Plus size={17} /> New lesson <ChevronDown size={14} /></button>
                         <button className={`nav-item ${activeFolder === 'All lessons' ? 'active' : ''}`} onClick={() => setActiveFolder('All lessons')}><LayoutGrid size={17} /> All lessons <span className="nav-count">{lessons.length}</span></button>
                         <button className={`nav-item ${activeFolder === 'Shared with me' ? 'active' : ''}`} onClick={() => setActiveFolder('Shared with me')}><Users size={17} /> Shared with me</button>
-                        {isSupabaseConfigured && authSession && <button className="nav-item" onClick={() => setShowMarketplace(true)}><Store size={17} /> Marketplace</button>}
+                        {isSupabaseConfigured && authSession && <button className="nav-item" onClick={() => { setMarketplaceLessonId(''); setShowMarketplace(true) }}><Store size={17} /> Marketplace</button>}
                         <div className="nav-section-heading"><span>My Students</span><button onClick={startNewFolder} aria-label="Create student folder" title="Create student folder"><FolderPlus size={16} /></button></div>
                         <nav className="folder-list">
                             {orderedFolders.map((folder, index) => {
@@ -2195,6 +2203,7 @@ function App() {
                                                 {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
                                                     <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
                                                     <button onClick={() => openDuplicateLessonDialog(lesson)}><Copy size={15} /> Make a copy</button>
+                                                    {authSession && isSupabaseConfigured && <button onClick={() => openMarketplacePublish(lesson)}><Store size={14} /> Publish to marketplace</button>}
                                                     <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
                                                     <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
                                                     <div className="menu-divider" />
