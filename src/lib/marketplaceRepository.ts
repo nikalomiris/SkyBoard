@@ -16,6 +16,7 @@ export type MarketplaceListing = {
     color: string
     tags: string[]
     pageCount: number
+    previewPages: MarketplacePage[]
     status: 'published' | 'unpublished'
     updatedAt: number
 }
@@ -24,11 +25,11 @@ export type MarketplacePurchase = { id: string; versionId: string; purchasedAt: 
 export type MarketplacePage = { name: string; background?: string; items: BoardItem[] }
 export type MarketplaceVersion = { id: string; title: string; color: string; cover?: Lesson['cover']; coverImage?: string; tags: string[]; cardDeck?: CardDeckConfig; pages: MarketplacePage[] }
 
-type ListingRow = { id: string; seller_id: string; seller_name: string; title: string; description: string; price_cents: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; page_count: number; status: 'published' | 'unpublished'; updated_at: string }
+type ListingRow = { id: string; seller_id: string; seller_name: string; title: string; description: string; price_cents: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; page_count: number; preview_pages: StoredPage[] | null; status: 'published' | 'unpublished'; updated_at: string }
 type StoredPage = { name: string; background?: string; elements: BoardItem[] }
 type VersionRow = { id: string; title: string; color: string; cover: string | null; cover_image: string | null; tags: string[]; card_deck: CardDeckConfig | null; pages: StoredPage[] }
 
-const listingColumns = 'id,seller_id,seller_name,title,description,price_cents,cover,cover_image,color,tags,page_count,status,updated_at'
+const listingColumns = 'id,seller_id,seller_name,title,description,price_cents,cover,cover_image,color,tags,page_count,preview_pages,status,updated_at'
 
 function getClient() {
     if (!supabase) throw new Error('The marketplace needs Supabase to be configured.')
@@ -48,6 +49,7 @@ function toListing(row: ListingRow): MarketplaceListing {
         color: row.color,
         tags: row.tags ?? [],
         pageCount: row.page_count,
+        previewPages: (row.preview_pages ?? []).map((page) => ({ name: page.name, background: page.background, items: page.elements })),
         status: row.status,
         updatedAt: new Date(row.updated_at).getTime(),
     }
@@ -105,6 +107,30 @@ async function assetBlob(item: Extract<BoardItem, { type: 'image' | 'pdf' }>) {
     return response.blob()
 }
 
+const previewPageLimit = 3
+
+// Previews are visible before purchase, so images are shrunk to low-resolution copies and PDFs stay private.
+async function previewItem(item: BoardItem): Promise<BoardItem> {
+    if (item.type === 'pdf') {
+        const { storagePath: _storagePath, ...rest } = item
+        return { ...rest, src: '' } as BoardItem
+    }
+    if (item.type !== 'image') return item
+    const { storagePath: _storagePath, ...rest } = item
+    try {
+        const bitmap = await createImageBitmap(await assetBlob(item))
+        const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+        canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+        bitmap.close()
+        return { ...rest, src: canvas.toDataURL('image/jpeg', 0.6) } as BoardItem
+    } catch {
+        return { ...rest, src: '' } as BoardItem
+    }
+}
+
 export type PublishInput = {
     listingId?: string
     lesson: Lesson
@@ -131,6 +157,10 @@ export async function publishLesson(sellerId: string, input: PublishInput): Prom
         }
         storedPages.push({ name: page.name, background: page.background, elements })
     }
+    const previewPages: StoredPage[] = []
+    for (const page of input.pages.slice(0, previewPageLimit)) {
+        previewPages.push({ name: page.name, background: page.background, elements: await Promise.all(page.items.map(previewItem)) })
+    }
     const result = await client.rpc('publish_marketplace_listing', {
         p_listing_id: listingId,
         p_version_id: versionId,
@@ -143,6 +173,7 @@ export async function publishLesson(sellerId: string, input: PublishInput): Prom
         p_tags: input.lesson.tags ?? [],
         p_card_deck: input.lesson.cardDeck ?? null,
         p_pages: storedPages,
+        p_preview: previewPages,
     })
     if (result.error) throw new Error(result.error.message)
     return listingId

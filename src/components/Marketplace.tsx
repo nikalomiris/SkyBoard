@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, Download, FileText, PackageCheck, Search, Store, Tag, Upload, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, Download, Eye, FileText, NotebookTabs, PackageCheck, Search, Store, Upload, User, X } from 'lucide-react'
 import LessonThumbnail from './LessonThumbnail'
-import { getItemBounds, getLineEndpoints, smoothPath } from '../lib/boardGeometry'
+import { getImageSize, getItemBounds, getLineEndpoints, registerImageAspect, smoothPath } from '../lib/boardGeometry'
 import {
     detachVersionAssets, formatPrice, listMyListings, listPublishedListings, listPurchases, loadOwnedVersion,
     publishLesson, purchaseListing, setListingStatus,
@@ -23,7 +23,7 @@ type MarketplaceProps = {
     onAddToWorkspace: (version: MarketplaceVersion, pages: MarketplacePage[], destinationFolder: string) => void
 }
 
-function ReadOnlyItem({ item }: { item: BoardItem }): ReactNode {
+function ReadOnlyItem({ item, onImageLoad }: { item: BoardItem; onImageLoad?: () => void }): ReactNode {
     const scale = item.scale ?? 1
     const x = 'left' in item ? item.left * 10 : 0
     const y = 'top' in item ? item.top * 6.2 : 0
@@ -44,35 +44,51 @@ function ReadOnlyItem({ item }: { item: BoardItem }): ReactNode {
     if (item.type === 'grid') {
         const cols = item.cols ?? 3
         const rows = item.rows ?? 3
-        return <foreignObject x={x} y={y} width={294 * scale} height={184 * scale}><div className="board-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>{item.values.map((value, index) => <span key={index} style={{ color: item.cellStyles?.[index]?.color ?? item.color ?? '#405f51', fontSize: `${(item.cellStyles?.[index]?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: item.fontFamily, display: 'grid', placeItems: 'center' }}>{value}</span>)}</div></foreignObject>
+        return <foreignObject x={x} y={y} width={294 * scale} height={184 * scale}><div className="board-grid" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>{item.values.map((value, index) => <span key={index} className="board-grid-cell" style={{ color: item.cellStyles?.[index]?.color ?? item.color ?? '#405f51', fontSize: `${(item.cellStyles?.[index]?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: item.fontFamily, display: 'grid', placeItems: 'center' }}>{value}</span>)}</div></foreignObject>
     }
-    if (item.type === 'image') return <foreignObject x={x} y={y} width={240 * scale} height={240 * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} /></foreignObject>
+    if (item.type === 'image' && !item.src) return <foreignObject x={x} y={y} width={240 * scale} height={160 * scale}><div className="pdf-tile"><FileText size={28} /><span>{item.label} (included after purchase)</span></div></foreignObject>
+    if (item.type === 'image') {
+        const size = getImageSize(item.src)
+        return <foreignObject x={x} y={y} width={size.width * scale} height={size.height * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) onImageLoad?.() }} /></foreignObject>
+    }
     return <foreignObject x={x} y={y} width={300 * scale} height={220 * scale}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></foreignObject>
 }
 
+function backgroundStyle(background?: string) {
+    if (!background) return '#fffef9'
+    return background.startsWith('data:') || background.startsWith('http') ? `center / cover url(${background})` : background
+}
+
 function PagePreview({ page }: { page: MarketplacePage }) {
-    const background = page.background
-    const isImage = !!background && (background.startsWith('data:') || background.startsWith('http'))
+    const [, setImageVersion] = useState(0)
     return (
-        <div className="market-page-preview" style={{ background: isImage ? `center / cover url(${background})` : background || '#fffef9' }}>
+        <div className="market-page-preview" style={{ background: backgroundStyle(page.background) }}>
             <svg viewBox="0 0 1000 620" role="img" aria-label={page.name}>
-                {page.items.map((item) => <g key={item.id}><ReadOnlyItem item={item} /></g>)}
+                {page.items.map((item) => <g key={item.id}><ReadOnlyItem item={item} onImageLoad={() => setImageVersion((version) => version + 1)} /></g>)}
             </svg>
         </div>
     )
 }
 
-function ListingCard({ listing, children, onOpen }: { listing: MarketplaceListing; children?: ReactNode; onOpen?: () => void }) {
+// Same cover rules as workspace lesson cards.
+function ListingThumbnail({ listing }: { listing: MarketplaceListing }) {
+    const [, setImageVersion] = useState(0)
+    const cover = listing.cover ?? 'vowels'
+    const firstPage = listing.previewPages[0]
+    if (cover === 'page' && firstPage) return <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundStyle(firstPage.background) }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{firstPage.items.map((item) => <g key={item.id}><ReadOnlyItem item={item} onImageLoad={() => setImageVersion((version) => version + 1)} /></g>)}</svg></div>
+    if (cover === 'custom' && listing.coverImage) return <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={listing.coverImage} alt="" /></div>
+    return <LessonThumbnail kind={cover === 'page' || cover === 'custom' ? 'vowels' : cover} tint={listing.color} />
+}
+
+function ListingCard({ listing, onOpen, actions }: { listing: MarketplaceListing; onOpen?: () => void; actions?: ReactNode }) {
     return (
-        <article className="market-card">
-            <button type="button" className="market-card-cover" onClick={onOpen} aria-label={`Open ${listing.title}`} disabled={!onOpen}>
-                {listing.coverImage ? <img src={listing.coverImage} alt="" /> : <LessonThumbnail kind={listing.cover ?? 'page'} tint={listing.color} />}
-            </button>
-            <div className="market-card-body">
-                <strong>{listing.title}</strong>
-                <span className="market-card-meta">by {listing.sellerName || 'SkyBoard teacher'} · {listing.pageCount} page{listing.pageCount === 1 ? '' : 's'}</span>
-                {listing.tags.length > 0 && <span className="market-card-meta"><Tag size={12} /> {listing.tags.join(', ')}</span>}
-                <div className="market-card-footer"><span className={`market-price ${listing.priceCents === 0 ? 'free' : ''}`}>{formatPrice(listing.priceCents)}</span>{children}</div>
+        <article className="lesson-card market-card" onClick={onOpen}>
+            <ListingThumbnail listing={listing} />
+            <div className="lesson-info">
+                <div className="lesson-name-line"><h2>{listing.title}</h2><span className={`market-price ${listing.priceCents === 0 ? 'free' : ''}`}>{formatPrice(listing.priceCents)}</span></div>
+                <div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{listing.pageCount} page{listing.pageCount === 1 ? '' : 's'}</span><span className="meta-dot">·</span><span className="market-seller"><User size={13} />{listing.sellerName || 'SkyBoard teacher'}</span></div>
+                {listing.tags.length > 0 && <div className="lesson-tags" aria-label={`Tags for ${listing.title}`}>{listing.tags.map((tag) => <span className="lesson-tag" key={tag}>{tag}</span>)}</div>}
+                {actions && <div className="market-card-actions" onClick={(event) => event.stopPropagation()}>{actions}</div>}
             </div>
         </article>
     )
@@ -178,6 +194,11 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
         }
     }
 
+    function openDetail(listing: MarketplaceListing) {
+        setDetail(listing)
+        setPreviewPage(0)
+    }
+
     function openPublish(existing?: MarketplaceListing, lessonId = '') {
         setRepublishing(existing ?? null)
         setPublishLessonId(lessonId)
@@ -240,22 +261,27 @@ export default function Marketplace({ userId, lessons, folders, itemsByPage, bac
                 {tab !== 'selling' && <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by title, teacher or tag" aria-label="Search marketplace" /></div></div>}
                 {error && <p className="market-message error" role="alert">{error}</p>}
                 {status && <p className="market-message" role="status">{status}</p>}
-                {loading ? <p className="market-empty" role="status">Loading…</p> : <div className="market-grid">
-                    {tab === 'browse' && (browseListings.length ? browseListings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => setDetail(listing)}>{purchasedIds.has(listing.id) ? <span className="market-owned-badge"><Check size={13} /> Owned</span> : <button className="mini primary" onClick={() => setDetail(listing)}>View</button>}</ListingCard>) : <p className="market-empty">No lessons found.</p>)}
-                    {tab === 'owned' && (purchases.filter((purchase) => matches(purchase.listing)).length ? purchases.filter((purchase) => matches(purchase.listing)).map((purchase) => <ListingCard key={purchase.id} listing={purchase.listing} onOpen={() => void openOwned(purchase)}><button className="mini primary" disabled={busyId === purchase.id} onClick={() => void openOwned(purchase)}>{busyId === purchase.id ? 'Opening…' : 'Open'}</button></ListingCard>) : <p className="market-empty">You haven’t purchased anything yet.</p>)}
-                    {tab === 'selling' && (myListings.length ? myListings.map((listing) => <ListingCard key={listing.id} listing={listing}><span className={`market-owned-badge ${listing.status}`}>{listing.status === 'published' ? 'Live' : 'Hidden'}</span><button className="mini" disabled={busyId === listing.id} onClick={() => void toggleListing(listing)}>{listing.status === 'published' ? 'Unpublish' : 'Publish'}</button><button className="mini" onClick={() => openPublish(listing)}>New version</button></ListingCard>) : <p className="market-empty">You haven’t published anything yet.</p>)}
+                {loading ? <p className="market-empty" role="status">Loading…</p> : <div className="lesson-grid market-grid">
+                    {tab === 'browse' && (browseListings.length ? browseListings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => openDetail(listing)} actions={<>{purchasedIds.has(listing.id) && <span className="market-owned-badge"><Check size={13} /> Owned</span>}<button className="mini" onClick={() => openDetail(listing)}><Eye size={13} /> Preview</button></>} />) : <p className="market-empty">No lessons found.</p>)}
+                    {tab === 'owned' && (purchases.filter((purchase) => matches(purchase.listing)).length ? purchases.filter((purchase) => matches(purchase.listing)).map((purchase) => <ListingCard key={purchase.id} listing={purchase.listing} onOpen={() => void openOwned(purchase)} actions={<button className="mini primary" disabled={busyId === purchase.id} onClick={() => void openOwned(purchase)}>{busyId === purchase.id ? 'Opening…' : 'Open'}</button>} />) : <p className="market-empty">You haven’t purchased anything yet.</p>)}
+                    {tab === 'selling' && (myListings.length ? myListings.map((listing) => <ListingCard key={listing.id} listing={listing} onOpen={() => openDetail(listing)} actions={<><span className={`market-owned-badge ${listing.status}`}>{listing.status === 'published' ? 'Live' : 'Hidden'}</span><button className="mini" disabled={busyId === listing.id} onClick={() => void toggleListing(listing)}>{listing.status === 'published' ? 'Unpublish' : 'Publish'}</button><button className="mini" onClick={() => openPublish(listing)}>New version</button></>} />) : <p className="market-empty">You haven’t published anything yet.</p>)}
                 </div>}
             </main>
 
-            {detail && <div className="modal-scrim" onClick={() => setDetail(null)}><div className="share-modal market-modal" role="dialog" aria-modal="true" aria-label={detail.title} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') setDetail(null) }}>
+            {detail && <div className="modal-scrim" onClick={() => setDetail(null)}><div className="share-modal market-modal market-owned-modal" role="dialog" aria-modal="true" aria-label={detail.title} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') setDetail(null) }}>
                 <button type="button" className="modal-close" onClick={() => setDetail(null)} aria-label="Close"><X size={18} /></button>
                 <h2>{detail.title}</h2>
                 <p>by {detail.sellerName || 'SkyBoard teacher'} · {detail.pageCount} page{detail.pageCount === 1 ? '' : 's'}</p>
                 <p className="market-description">{detail.description || 'No description provided.'}</p>
+                {detail.previewPages[previewPage] ? <>
+                    <PagePreview page={detail.previewPages[previewPage]} />
+                    <div className="market-pager"><button className="mini icon" aria-label="Previous preview page" title="Previous page" disabled={previewPage === 0} onClick={() => setPreviewPage((page) => page - 1)}><ChevronLeft size={15} /></button><span>{detail.previewPages[previewPage].name} · {previewPage + 1} / {detail.previewPages.length}</span><button className="mini icon" aria-label="Next preview page" title="Next page" disabled={previewPage >= detail.previewPages.length - 1} onClick={() => setPreviewPage((page) => page + 1)}><ChevronRight size={15} /></button></div>
+                    <p className="market-note">Previewing {detail.previewPages.length} of {detail.pageCount} page{detail.pageCount === 1 ? '' : 's'}. Full-quality images and PDFs are included after purchase.</p>
+                </> : <p className="market-note">No preview is available for this lesson.</p>}
                 <div className="new-lesson-actions"><span className={`market-price ${detail.priceCents === 0 ? 'free' : ''}`}>{formatPrice(detail.priceCents)}</span>
-                    {purchasedIds.has(detail.id) ? <button className="confirm-button" onClick={() => { const purchase = purchases.find((candidate) => candidate.listing.id === detail.id); setDetail(null); if (purchase) void openOwned(purchase) }}><PackageCheck size={15} /> Already owned — open</button> : <button className="confirm-button" disabled={busyId === detail.id} onClick={() => void buy(detail)}>{busyId === detail.id ? 'Processing…' : detail.priceCents === 0 ? 'Get for free' : `Buy for ${formatPrice(detail.priceCents)}`}</button>}
+                    {detail.sellerId === userId ? null : purchasedIds.has(detail.id) ? <button className="confirm-button" onClick={() => { const purchase = purchases.find((candidate) => candidate.listing.id === detail.id); setDetail(null); if (purchase) void openOwned(purchase) }}><PackageCheck size={15} /> Already owned — open</button> : <button className="confirm-button" disabled={busyId === detail.id} onClick={() => void buy(detail)}>{busyId === detail.id ? 'Processing…' : detail.priceCents === 0 ? 'Get for free' : `Buy for ${formatPrice(detail.priceCents)}`}</button>}
                 </div>
-                {detail.priceCents > 0 && <p className="market-note">Checkout is simulated for now; no payment is taken.</p>}
+                {detail.priceCents > 0 && detail.sellerId !== userId && <p className="market-note">Checkout is simulated for now; no payment is taken.</p>}
             </div></div>}
 
             {owned && <div className="modal-scrim" onClick={() => setOwned(null)}><div className="share-modal market-modal market-owned-modal" role="dialog" aria-modal="true" aria-label={`${owned.version.title} (owned)`} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') setOwned(null) }}>
