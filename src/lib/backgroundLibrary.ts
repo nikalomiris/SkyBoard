@@ -3,9 +3,12 @@ import { supabase } from './supabase'
 export type LibraryBackground = { id: string; name: string; group: string; image: string }
 
 const storageKey = 'skyboard:background-library'
-const maxDimension = 1920
+export const boardImageMaxDimension = 1024
+export const coverImageMaxDimension = 480
+export const backgroundImageMaxDimension = 1280
+export const imageQuality = 0.7
 
-export function downscaleImage(file: File): Promise<string> {
+export function downscaleImage(file: File, maxDimension = boardImageMaxDimension): Promise<string> {
     return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file)
         const img = new Image()
@@ -17,8 +20,11 @@ export function downscaleImage(file: File): Promise<string> {
             canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
             const context = canvas.getContext('2d')
             if (!context) { reject(new Error('Canvas unavailable')); return }
+            // JPEG has no alpha channel, so flatten transparency onto white.
+            context.fillStyle = '#fff'
+            context.fillRect(0, 0, canvas.width, canvas.height)
             context.drawImage(img, 0, 0, canvas.width, canvas.height)
-            resolve(canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', 0.85))
+            resolve(canvas.toDataURL('image/jpeg', imageQuality))
         }
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')) }
         img.src = url
