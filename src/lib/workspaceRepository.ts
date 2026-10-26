@@ -80,7 +80,7 @@ async function resolveAssetUrls(items: BoardItem[], cache: Map<string, string>) 
                 if (!/not found/i.test(result.error.message)) throw new Error(result.error.message)
                 // The file is gone from storage; keep the item as an empty placeholder instead of blocking the whole workspace.
                 console.warn(`Missing asset in storage: ${item.storagePath}`)
-                return { ...item, src: '', storagePath: undefined }
+                return { ...item, src: '' }
             }
             signedUrl = result.data.signedUrl
             cache.set(item.storagePath, signedUrl)
@@ -227,7 +227,11 @@ async function storeAsset(ownerId: string, lessonId: string, pageId: string, ite
         desiredPaths.add(storagePath)
         if (!existingAssetPaths.has(storagePath)) {
             const downloaded = await client.storage.from(assetBucket).download(storagePath)
-            if (downloaded.error) throw new Error(downloaded.error.message)
+            if (downloaded.error) {
+                // Keep the reference to a file that is currently missing so it can be restored later.
+                if (/not found/i.test(downloaded.error.message)) return { ...item, src: '', storagePath }
+                throw new Error(downloaded.error.message)
+            }
             fileSize = downloaded.data.size
             contentType = downloaded.data.type || contentType
             pendingAssets.set(storagePath, { owner_id: ownerId, lesson_id: lessonId, page_id: pageId, storage_path: storagePath, file_name: item.label, content_type: contentType, size_bytes: Math.max(fileSize, 1) })
@@ -437,25 +441,7 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
         if (deleted.error) throw new Error(deleted.error.message)
     }
 
-    // Items can move between pages, so usage is judged across the whole lesson, never by an asset's recorded page.
-    const referencedPaths = new Set(desiredAssetPaths)
-    for (const lesson of lessons) {
-        for (let position = 0; position < lesson.pages.length; position += 1) {
-            for (const item of itemsByPage[`${lesson.id}:${position}`] ?? []) {
-                if ((item.type === 'image' || item.type === 'pdf') && item.storagePath) referencedPaths.add(item.storagePath)
-            }
-        }
-    }
-    const touchedLessonIds = new Set([...pagesToSave.map((page) => page.lessonId), ...completeLessonIds, ...deletedLessonIds])
-    const staleAssetPaths = existingAssets
-        .filter((asset) => touchedLessonIds.has(asset.lesson_id) && !referencedPaths.has(asset.storage_path))
-        .map((asset) => asset.storage_path)
-    if (staleAssetPaths.length) {
-        const removed = await client.storage.from(assetBucket).remove(staleAssetPaths)
-        if (removed.error) throw new Error(removed.error.message)
-        const deleted = await client.from('lesson_assets').delete().in('storage_path', staleAssetPaths)
-        if (deleted.error) throw new Error(deleted.error.message)
-    }
+    // Assets are intentionally never deleted here: orphaned files are cheap, while a wrongly deleted file is unrecoverable data loss.
 
     await removeStaleHierarchy?.()
 
