@@ -23,3 +23,7 @@ additional_redirect_urls = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
 [auth.email]
 enable_signup = true
+
+[functions.check-embed]
+enabled = true
+verify_jwt = false # the function validates the user session itself, which also works with publishable keys
