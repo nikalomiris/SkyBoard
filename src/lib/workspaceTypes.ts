@@ -8,6 +8,7 @@ export type BoardItem = { id: string; scale?: number } & (
     | { type: 'grid'; left: number; top: number; values: string[]; rows?: number; cols?: number; fontSize?: number; fontFamily?: string; color?: string; cellStyles?: GridCellStyle[] }
     | { type: 'image'; left: number; top: number; src: string; label: string; storagePath?: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string; storagePath?: string }
+    | { type: 'web'; left: number; top: number; url: string; title: string; zoom?: number }
 )
 
 export type DeckTile = { text: string; kind?: string }
