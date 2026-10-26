@@ -27,6 +27,9 @@ function strokeHit(points: string, x: number, y: number) {
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 export const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 export const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
+export const silentETiles = ['ge', 'a_e', 'e_e', 'i_e', 'o_e', 'u_e', 'e']
+const blendingBoardSilentETiles = ['ge', 'e']
+export const closedExceptionTiles = ['ild', 'ind', 'old', 'ost', 'olt']
 export const gluedSoundTiles = ['ing', 'ang', 'ong', 'ung', 'ink', 'ank', 'onk', 'unk']
 export const syllableLabels = ['closed', 'open', 'magic e', 'vowel teams', 'r-controlled', 'consonant LE']
 const syllableLabelSet = new Set(syllableLabels)
@@ -54,7 +57,7 @@ export const initialFinalBlendRows = [
     ['sk', 'sn', 'sm', 'sp', 'sw', 'tw', 'str'],
     ['nd', 'nt', 'mp', 'ft', 'st', 'ct'],
 ]
-const tabs = ['Basic Tiles', 'Glued Sounds', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels'] as const
+const tabs = ['Basic Tiles', 'Glued Sounds', 'Silent e', 'Closed Exceptions', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels'] as const
 const boardColors = [
     { name: 'Sky', color: '#81a6c6' },
     { name: 'Lavender', color: '#c9bce8' },
@@ -83,7 +86,7 @@ let measureContext: CanvasRenderingContext2D | null | undefined
 function textWidth(text: string) {
     if (measureContext === undefined) measureContext = document.createElement('canvas').getContext('2d')
     if (!measureContext) return text.length * CANVAS_FONT_SIZE * 0.6
-    measureContext.font = `600 ${CANVAS_FONT_SIZE}px Questrial, sans-serif`
+    measureContext.font = `400 ${CANVAS_FONT_SIZE}px Lexend, sans-serif`
     return measureContext.measureText(text).width
 }
 
@@ -231,12 +234,16 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
 
     return <div className={`blending-board${readOnly ? ' read-only' : ''}${drawTool ? ' drawing-mode' : ''}`} style={{ ['--board-accent' as string]: accentColor }}>
         {!readOnly && <div className="blending-tabs">
-            {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} disabled={tab !== 'Basic Tiles' && tab !== 'Glued Sounds' && tab !== 'Advanced Vowels' && tab !== 'Prefixes, Roots & Suffixes' && tab !== 'Capital Letters' && tab !== 'Syllable Labels'} onClick={() => setActiveTab(tab)}>{tab}</button>)}
+            {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
         </div>}
         {!readOnly && <div className="blending-tray">
-            {tabs.filter((tab) => tab === 'Basic Tiles' || tab === 'Glued Sounds' || tab === 'Advanced Vowels' || tab === 'Prefixes, Roots & Suffixes' || tab === 'Capital Letters' || tab === 'Syllable Labels').map((tab) => <div key={tab} className={`blending-tray-panel ${tab === activeTab ? 'active' : ''}`} aria-hidden={tab !== activeTab}>
-            {tab === 'Syllable Labels' ? <div className="blending-syllable-labels" role="group" aria-label="Syllable labels">
+            {tabs.map((tab) => <div key={tab} className={`blending-tray-panel ${tab === activeTab ? 'active' : ''}`} aria-hidden={tab !== activeTab}>
+            {tab === 'Silent e' ? <div className="blending-special-tiles" role="group" aria-label="Silent e tiles">
+                {blendingBoardSilentETiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+            </div> : tab === 'Closed Exceptions' ? <div className="blending-special-tiles" role="group" aria-label="Closed exception tiles">
+                {closedExceptionTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+            </div> : tab === 'Syllable Labels' ? <div className="blending-syllable-labels" role="group" aria-label="Syllable labels">
                 {syllableLabels.map((text) => {
                     const size = tileSize(text)
                     return <button key={text} className="tray-tile syllable-label-tile" style={{ width: size.width, height: size.height }} aria-label={`Drag ${text} syllable label`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>
