@@ -51,7 +51,7 @@ function deckTileClass(tile: DeckTile) {
 const catalog: { label: string; tiles: DeckTile[] }[] = [
     { label: 'Letters', tiles: letterTiles.map((text) => ({ text })) },
     { label: 'Digraphs', tiles: digraphTiles.map((text) => ({ text })) },
-    { label: 'Silent e', tiles: silentETiles.map((text) => ({ text, ...(text === 'e' ? { kind: 'consonant' } : {}) })) },
+    { label: 'Silent e', tiles: silentETiles.filter((text) => text !== 'e').map((text) => ({ text })) },
     { label: 'Closed Exceptions', tiles: closedExceptionTiles.map((text) => ({ text })) },
     { label: 'Glued sounds', tiles: gluedSoundTiles.map((text) => ({ text })) },
     { label: 'Advanced vowels', tiles: advancedVowelGroups.flat().map((text) => ({ text })) },

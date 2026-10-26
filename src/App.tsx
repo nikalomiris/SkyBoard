@@ -2225,7 +2225,16 @@ function App() {
                                     <button className="page-directory-button" aria-label="Browse and manage pages" title="Browse and manage pages" aria-expanded={showPageDirectory} onClick={() => setShowPageDirectory(!showPageDirectory)}>{pageIndex + 1}/{pages.length}</button>
                                     <button className="page-nav-step" aria-label="Next page" title="Next page" disabled={pageIndex >= pages.length - 1} onClick={() => { setPageIndex(pageIndex + 1); setSelectedItemId(null) }}><ChevronRight size={16} /></button>
                                 </div>
-                                {showPageDirectory && openLesson && <div className="page-directory-menu">
+                                {showPageDirectory && openLesson && <div className="page-directory-menu" onDragOver={(event) => {
+                                    if (draggedPageIndex === null) return
+                                    const menu = event.currentTarget
+                                    const rect = menu.getBoundingClientRect()
+                                    const actionsHeight = menu.querySelector('.page-directory-actions')?.getBoundingClientRect().height ?? 0
+                                    const zone = 48
+                                    const topEdge = rect.top + actionsHeight
+                                    if (event.clientY < topEdge + zone) menu.scrollBy({ top: -Math.ceil((topEdge + zone - event.clientY) / 3) - 4 })
+                                    else if (event.clientY > rect.bottom - zone) menu.scrollBy({ top: Math.ceil((event.clientY - (rect.bottom - zone)) / 3) + 4 })
+                                }}>
                                     <div className="page-directory-actions">
                                         {pageSelectionMode
                                             ? <>

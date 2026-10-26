@@ -2564,6 +2564,12 @@ kbd {
 
 .page-directory-actions {
     grid-column: 1 / -1;
+    position: sticky;
+    top: -8px;
+    z-index: 2;
+    margin: -8px -8px 0;
+    padding: 8px 8px 6px;
+    background: white;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
