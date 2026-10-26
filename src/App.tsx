@@ -46,7 +46,7 @@ type SizedTool = 'pen' | 'brush' | 'highlighter' | 'eraser'
 const sizedTools: SizedTool[] = ['pen', 'brush', 'highlighter', 'eraser']
 const sizePresets: Record<SizedTool, number[]> = { pen: [1, 2, 3, 5, 8, 12], brush: [5, 8, 11, 16, 24, 34], highlighter: [12, 18, 24, 34, 46, 60], eraser: [14, 20, 28, 44, 64, 84] }
 const toolOpacity: Record<SizedTool, number> = { pen: 1, brush: 0.76, highlighter: 0.42, eraser: 1 }
-const studentToolIds: Tool[] = ['pen', 'brush', 'highlighter', 'eraser', 'text']
+const studentToolIds: Tool[] = ['select', 'pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
