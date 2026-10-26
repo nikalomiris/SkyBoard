@@ -46,7 +46,7 @@ type SizedTool = 'pen' | 'brush' | 'highlighter' | 'eraser'
 const sizedTools: SizedTool[] = ['pen', 'brush', 'highlighter', 'eraser']
 const sizePresets: Record<SizedTool, number[]> = { pen: [1, 2, 3, 5, 8, 12], brush: [5, 8, 11, 16, 24, 34], highlighter: [12, 18, 24, 34, 46, 60], eraser: [14, 20, 28, 44, 64, 84] }
 const toolOpacity: Record<SizedTool, number> = { pen: 1, brush: 0.76, highlighter: 0.42, eraser: 1 }
-const studentToolIds: Tool[] = ['pen', 'brush', 'highlighter', 'eraser', 'text']
+const studentToolIds: Tool[] = ['select', 'pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
     { id: 'pen', label: 'Pen', icon: Pencil },
@@ -365,6 +365,7 @@ function App() {
     const canRedo = Boolean(currentHistory?.future.length)
     const isMockWorkspace = !isSupabaseConfigured && !studentView
 
+    const inlineBackgroundLimit = 20000
     const liveStateRef = useRef({ pageIndex, pages, items: currentItems, background })
     liveStateRef.current = { pageIndex, pages, items: currentItems, background }
     const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
@@ -444,10 +445,18 @@ function App() {
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'deck', payload: deckStateRef.current })
     }
+    const broadcastBackground = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        const { pageIndex: index, background: value } = liveStateRef.current
+        if (value.length > inlineBackgroundLimit) void channel.send({ type: 'broadcast', event: 'bg', payload: { pageIndex: index, background: value } })
+    }
     const broadcastLiveState = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
-        void channel.send({ type: 'broadcast', event: 'state', payload: liveStateRef.current })
+        const live = liveStateRef.current
+        // Large image backgrounds travel separately so they can never block page navigation.
+        void channel.send({ type: 'broadcast', event: 'state', payload: { ...live, background: live.background.length > inlineBackgroundLimit ? null : live.background } })
         broadcastBlendState()
         broadcastDeckState()
         broadcastLock()
@@ -460,7 +469,7 @@ function App() {
         const channel = supabase.channel(`lesson-live:${shareSessionId}`)
         liveChannelRef.current = channel
         liveSubscribedRef.current = false
-        channel.on('broadcast', { event: 'hello' }, () => broadcastLiveState())
+        channel.on('broadcast', { event: 'hello' }, () => { broadcastLiveState(); broadcastBackground() })
         channel.on('presence', { event: 'sync' }, () => {
             const members = Object.values(channel.presenceState()).flat() as unknown as { role?: string; inviteId?: string }[]
             setOnlineInviteIds([...new Set(members.filter((member) => member.role === 'student' && member.inviteId).map((member) => member.inviteId as string))])
@@ -490,6 +499,7 @@ function App() {
             if (status === 'SUBSCRIBED') {
                 void channel.track({ role: 'teacher' })
                 broadcastLiveState()
+                broadcastBackground()
             }
         })
         return () => {
@@ -505,6 +515,11 @@ function App() {
         const timeout = window.setTimeout(broadcastLiveState, 120)
         return () => window.clearTimeout(timeout)
     }, [shareSessionId, studentView, pageIndex, pages, currentItems, background])
+    useEffect(() => {
+        if (!shareSessionId || studentView) return
+        const timeout = window.setTimeout(broadcastBackground, 150)
+        return () => window.clearTimeout(timeout)
+    }, [shareSessionId, studentView, pageIndex, background])
 
     useEffect(() => {
         if (!shareSessionId || studentView) return
@@ -580,7 +595,7 @@ function App() {
         channel.on('broadcast', { event: 'draft' }, ({ payload }) => { if (admitted()) handleRemoteDraft({ payload }) })
         channel.on('broadcast', { event: 'state' }, ({ payload }) => {
             if (!admitted()) return
-            const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string }
+            const live = payload as { pageIndex: number; pages: string[]; items: BoardItem[]; background: string | null }
             if (!live || !Array.isArray(live.pages) || !Array.isArray(live.items)) return
             liveReceivedRef.current = true
             setRemoteDraft(null)
@@ -588,8 +603,15 @@ function App() {
             setPages(live.pages)
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
             setPageIndex(live.pageIndex)
-            setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background })
+            setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background ?? undefined })
             setSelectedItemId(null)
+        })
+        channel.on('broadcast', { event: 'bg' }, ({ payload }) => {
+            if (!admitted()) return
+            const bg = payload as { pageIndex: number; background: string }
+            const lessonId = openLessonIdRef.current
+            if (!lessonId || typeof bg?.background !== 'string' || typeof bg.pageIndex !== 'number') return
+            setBackgroundsByPage((previous) => ({ ...previous, [`${lessonId}:${bg.pageIndex}`]: bg.background }))
         })
         channel.on('broadcast', { event: 'kick' }, ({ payload }) => {
             const kick = payload as { ids?: string[] | null; reason?: string }
@@ -651,12 +673,12 @@ function App() {
             void client.removeChannel(channel)
         }
     }, [studentView, studentSessionId])
-    const [liveLessonPage, setLiveLessonPage] = useState<{ index: number; items: BoardItem[]; background: string } | null>(null)
+    const [liveLessonPage, setLiveLessonPage] = useState<{ index: number; items: BoardItem[]; background?: string } | null>(null)
     useEffect(() => {
         if (!liveLessonPage || !openLesson) return
         const key = `${openLesson.id}:${liveLessonPage.index}`
         setItemsByPage((previous) => ({ ...previous, [key]: liveLessonPage.items }))
-        setBackgroundsByPage((previous) => ({ ...previous, [key]: liveLessonPage.background }))
+        if (liveLessonPage.background !== undefined) setBackgroundsByPage((previous) => ({ ...previous, [key]: liveLessonPage.background as string }))
     }, [liveLessonPage, openLesson?.id])
     const tagEditorLesson = lessons.find((lesson) => lesson.id === tagEditorLessonId) ?? null
     const coverEditorLesson = lessons.find((lesson) => lesson.id === coverEditorLessonId) ?? null
