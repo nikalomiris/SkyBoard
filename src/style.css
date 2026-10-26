@@ -1,8 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Roboto:wght@400;500;700&family=Manrope:wght@400;700&family=Questrial&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Lexend:wght@400&family=Roboto:wght@400;500;700&family=Manrope:wght@400;700&display=swap');
 
 :root {
     --font-ui: 'Roboto', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-board: 'Questrial', sans-serif;
+    --font-board: 'Lexend', sans-serif;
     font-family: var(--font-ui);
     color: color-mix(in srgb, var(--accent) 54%, black);
     background: color-mix(in srgb, var(--accent) 5%, white);
@@ -4303,19 +4303,21 @@ kbd {
 
 .blending-tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 8px;
     background: white;
 }
 
 .blending-tabs button:not(.blending-close) {
-    flex: 1;
+    flex: 1 1 auto;
     padding: 9px 6px;
     border: 0;
     border-radius: 6px;
     background: color-mix(in srgb, var(--board-accent) 62%, #354354);
     color: white;
     font: 13px var(--font-ui);
+    white-space: nowrap;
 }
 
 .blending-tabs button.active {
@@ -4331,6 +4333,7 @@ kbd {
 }
 
 .blending-close {
+    flex: 0 0 34px;
     width: 34px;
     border: 0;
     border-radius: 6px;
@@ -4385,6 +4388,19 @@ kbd {
     flex-wrap: wrap;
     justify-content: center;
     gap: 7px;
+    margin: 0 auto;
+    padding: 6px;
+    border-radius: 10px;
+    background: #f3f3f3;
+}
+
+.blending-special-tiles {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-self: flex-start;
+    gap: 6px;
     margin: 0 auto;
     padding: 6px;
     border-radius: 10px;
@@ -4550,9 +4566,15 @@ kbd {
 }
 
 .glued-sound-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     width: 36px;
     height: 32px;
+    padding: 0;
     font-size: 14px;
+    line-height: 1;
+    text-align: center;
 }
 
 .consonant {
@@ -4733,7 +4755,7 @@ kbd {
     background: #fff;
     box-shadow: 0 3px 0 #bfc1c3;
     color: #111;
-    font: 600 15px var(--font-board);
+    font: 400 15px var(--font-board);
     cursor: grab;
     touch-action: none;
 }
@@ -5571,7 +5593,7 @@ kbd {
     border: 2px solid #333;
     border-radius: 7px;
     color: #111;
-    font: 600 19px var(--font-board);
+    font: 400 19px var(--font-board);
     cursor: default;
 }
 
@@ -5660,7 +5682,7 @@ button.deck-chip.selected {
     border: 2px solid #333;
     border-radius: 7px;
     color: #111;
-    font: 600 clamp(80px, 16vw, 200px) / 1.1 var(--font-board);
+    font: 400 clamp(80px, 16vw, 200px) / 1.1 var(--font-board);
     box-shadow: 0 4px 0 #0002;
 }
 
