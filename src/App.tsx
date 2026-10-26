@@ -231,6 +231,12 @@ function App() {
     const [backgroundDraft, setBackgroundDraft] = useState<{ src: string; fit: BackgroundFit; scope: 'current' | 'all'; libraryId?: string; name: string; group: string; newGroup: string; busy?: boolean; error?: string } | null>(null)
     const [backgroundLibrary, setBackgroundLibrary] = useState<LibraryBackground[]>([])
     const [backgroundLibraryError, setBackgroundLibraryError] = useState('')
+    const [imageNotice, setImageNotice] = useState<{ tone: 'warning' | 'success' | 'error'; text: string } | null>(null)
+    useEffect(() => {
+        if (!imageNotice || imageNotice.tone === 'warning') return
+        const timer = window.setTimeout(() => setImageNotice(null), 6000)
+        return () => window.clearTimeout(timer)
+    }, [imageNotice])
     const backgroundOwnerId = authSession?.user.id ?? null
     useEffect(() => {
         if (studentView || (isSupabaseConfigured && !backgroundOwnerId)) { setBackgroundLibrary([]); return }
@@ -1869,12 +1875,19 @@ function App() {
 
     function handleImage(event: ChangeEvent<HTMLInputElement>) {
         const input = event.target
-        const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'))
+        const isImage = (file: File) => file.type.startsWith('image/') || (!file.type && /\.(heic|heif|tiff?|bmp|avif|ico|jfif)$/i.test(file.name))
+        const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || isImage(file))
         input.value = ''
         if (!files.length) return
-        const readFile = (file: File) => file.type.startsWith('image/') && file.type !== 'image/svg+xml'
-            ? downscaleImage(file).catch(() => readOriginal(file))
-            : readOriginal(file)
+        const needsConversion = (file: File) => isImage(file) && !['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'].includes(file.type)
+        const unusual = files.filter(needsConversion)
+        if (unusual.length) setImageNotice({ tone: 'warning', text: `${unusual.map((file) => file.name).join(', ')} ${unusual.length === 1 ? 'is' : 'are'} not a widely supported image format. We will try to convert ${unusual.length === 1 ? 'it' : 'them'} to JPEG.` })
+        else setImageNotice(null)
+        const readFile = (file: File) => needsConversion(file)
+            ? downscaleImage(file)
+            : file.type.startsWith('image/') && file.type !== 'image/svg+xml'
+                ? downscaleImage(file).catch(() => readOriginal(file))
+                : readOriginal(file)
         const readOriginal = (file: File) => new Promise<string>((resolve, reject) => {
             const reader = new FileReader()
             reader.onload = () => resolve(String(reader.result))
@@ -1882,6 +1895,9 @@ function App() {
             reader.readAsDataURL(file)
         })
         void Promise.allSettled(files.map(readFile)).then((results) => {
+            const failed = files.filter((file, index) => results[index].status === 'rejected' && needsConversion(file))
+            if (failed.length) setImageNotice({ tone: 'error', text: `Could not convert ${failed.map((file) => file.name).join(', ')}. Please try a JPEG or PNG instead.` })
+            else if (unusual.length) setImageNotice({ tone: 'success', text: `Converted ${unusual.length === 1 ? unusual[0].name : `${unusual.length} images`} to JPEG.` })
             // Cascade each file so the items partially overlap.
             const newItems: BoardItem[] = []
             const toCrop: { src: string; label: string; left: number; top: number }[] = []
@@ -2726,6 +2742,7 @@ function App() {
             {renamingFolder && <div className="modal-scrim" onClick={() => setRenamingFolder(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); commitFolderRename() }}><button type="button" className="modal-close" onClick={() => setRenamingFolder(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Pencil size={20} /></div><h2>Rename {getFolderParent(renamingFolder) ? 'folder' : 'student'}</h2><p>{getFolderParent(renamingFolder) ? `Inside ${getFolderParent(renamingFolder)}` : 'Update this student name and keep their folders and lessons together.'}</p><label className="new-lesson-field">{getFolderParent(renamingFolder) ? 'Folder name' : 'Student name'}<input autoFocus required value={folderRenameValue} onChange={(event) => { setFolderRenameValue(event.target.value); setFolderRenameError('') }} /></label>{folderRenameError && <p className="form-error" role="alert">{folderRenameError}</p>}<div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setRenamingFolder(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!folderRenameValue.trim()}><Pencil size={15} /> Rename</button></div></form></div>}
             {subfolderParent && <div className="modal-scrim" onClick={() => setSubfolderParent(null)}><form className="share-modal subfolder-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); createSubfolder() }}><button type="button" className="modal-close" onClick={() => setSubfolderParent(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FolderPlus size={20} /></div><h2>New subfolder</h2><p>Inside {subfolderParent}</p><label className="new-lesson-field">Subfolder name<input autoFocus required value={subfolderName} onChange={(event) => setSubfolderName(event.target.value)} placeholder="e.g. Reading goals" /></label><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setSubfolderParent(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={!subfolderName.trim()}><FolderPlus size={15} /> Create subfolder</button></div></form></div>}
             {tagEditorLesson && <div className="modal-scrim" onClick={() => setTagEditorLessonId(null)}><form className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); addLessonTag() }}><button type="button" className="modal-close" onClick={() => setTagEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Tag size={20} /></div><h2>Lesson tags</h2><p>{tagEditorLesson.title}</p><label className="new-lesson-field">Add a tag<input autoFocus value={newTagValue} onChange={(event) => setNewTagValue(event.target.value)} placeholder="e.g. articulation" /></label><div className="tag-editor-actions"><button type="submit" className="confirm-button" disabled={!newTagValue.trim()}><Plus size={15} /> Add tag</button></div>{tagEditorLesson.tags?.length ? <div className="tag-editor-list" aria-label="Current tags">{tagEditorLesson.tags.map((tag) => <span className="lesson-tag removable" key={tag}>{tag}<button type="button" onClick={() => removeLessonTag(tag)} aria-label={`Remove ${tag} tag`}><X size={12} /></button></span>)}</div> : <p className="tag-empty-state">No tags yet</p>}</form></div>}
+            {imageNotice && <div className={`image-notice ${imageNotice.tone}`} role={imageNotice.tone === 'error' ? 'alert' : 'status'}><span>{imageNotice.text}</span><button type="button" aria-label="Dismiss" title="Dismiss" onClick={() => setImageNotice(null)}><X size={14} /></button></div>}
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
             {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}

@@ -6124,3 +6124,8 @@ button.deck-chip.selected {
     border: 1px solid #b26a00;
     color: #7a4900;
 }
+
+.image-notice { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 10px; max-width: min(520px, 90vw); padding: 10px 14px; border-radius: 10px; background: #fff4da; color: #5c4400; border: 1px solid #f7c948; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); font-size: 14px; }
+.image-notice.success { background: #eaf6e6; color: #1f5130; border-color: #8fd19e; }
+.image-notice.error { background: #fce8e8; color: #7a1f1f; border-color: #f4a6b8; }
+.image-notice button { border: 0; background: transparent; color: inherit; cursor: pointer; display: grid; place-items: center; }
