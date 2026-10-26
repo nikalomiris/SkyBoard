@@ -110,6 +110,7 @@ function App() {
     const [shapeFillEnabled, setShapeFillEnabled] = useState(false)
     const [shapeFillColor, setShapeFillColor] = useState(palette[2])
     const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
+    const [gridScope, setGridScope] = useState<'cell' | 'row' | 'column'>('cell')
     const [activeGridCell, setActiveGridCell] = useState<{ itemId: string; index: number } | null>(null)
     const [ink, setInk] = useState(palette[0])
     const [toolSizes, setToolSizes] = useState<Record<SizedTool, number>>({ pen: 3, brush: 11, highlighter: 24, eraser: 28 })
@@ -1574,7 +1575,10 @@ function App() {
         updateCurrentItems((items) => items.map((item) => {
             if (item.id !== selectedItem.id || item.type !== 'grid') return item
             const cellStyles = [...(item.cellStyles ?? [])]
-            cellStyles[cellIndex] = transform(cellStyles[cellIndex] ?? {}, item)
+            const before = cellStyles[cellIndex] ?? {}
+            const after = transform(before, item)
+            const patch = Object.fromEntries(Object.entries(after).filter(([key, value]) => before[key as keyof GridCellStyle] !== value))
+            for (const index of getGridScopeIndices(item, cellIndex)) cellStyles[index] = { ...(cellStyles[index] ?? {}), ...patch }
             return { ...item, cellStyles }
         }))
     }
@@ -1878,6 +1882,25 @@ function App() {
         target?.focus()
     }
 
+    function getGridScopeIndices(grid: Extract<BoardItem, { type: 'grid' }>, cellIndex: number) {
+        const cols = grid.cols ?? 3
+        const rows = grid.rows ?? 3
+        if (gridScope === 'row') return Array.from({ length: cols }, (_, col) => Math.floor(cellIndex / cols) * cols + col)
+        if (gridScope === 'column') return Array.from({ length: rows }, (_, row) => row * cols + (cellIndex % cols))
+        return [cellIndex]
+    }
+
+    function setGridScopeAlign(align: 'left' | 'center' | 'right') {
+        if (studentView || !selectedItem || selectedItem.type !== 'grid' || activeGridCell?.itemId !== selectedItem.id) return
+        const cellIndex = activeGridCell.index
+        updateCurrentItems((items) => items.map((item) => {
+            if (item.id !== selectedItem.id || item.type !== 'grid') return item
+            const cellStyles = [...(item.cellStyles ?? [])]
+            for (const index of getGridScopeIndices(item, cellIndex)) cellStyles[index] = { ...(cellStyles[index] ?? {}), align }
+            return { ...item, cellStyles }
+        }))
+    }
+
     function setGridValue(itemId: string, valueIndex: number, value: string) {
         if (studentView) return
         updateCurrentItems((items) => items.map((item) => item.id === itemId && item.type === 'grid' ? { ...item, values: item.values.map((cell, index) => index === valueIndex ? value : cell) } : item))
@@ -2049,7 +2072,7 @@ function App() {
                     <div className="board-grid" data-grid-id={item.id} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
                         {item.values.map((value, index) => {
                             const cellStyle = item.cellStyles?.[index]
-                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${(cellStyle?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
+                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ textAlign: cellStyle?.align ?? 'center', color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${(cellStyle?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
                         })}
                     </div>
                 </foreignObject>
@@ -2290,6 +2313,10 @@ function App() {
                                 {renderToolColorToolbar()}
                                 {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
                                     <span>Cell {activeGridCell.index + 1}</span>
+                                    <div className="grid-scope-group" role="radiogroup" aria-label="Apply text and alignment to">
+                                        {(['cell', 'row', 'column'] as const).map((scope) => <button key={scope} type="button" role="radio" aria-checked={gridScope === scope} className={gridScope === scope ? 'active' : ''} title={`Apply to ${scope}`} aria-label={`Apply to ${scope}`} onClick={() => setGridScope(scope)}>{scope[0].toUpperCase() + scope.slice(1)}</button>)}
+                                    </div>
+                                    {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([align, Icon]) => <button key={align} type="button" className={(selectedGridCellStyle?.align ?? 'center') === align ? 'active' : ''} title={`Align ${gridScope} ${align}`} aria-label={`Align ${gridScope} ${align}`} onClick={() => setGridScopeAlign(align)}><Icon size={14} /></button>)}
                                     <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
                                     <span className="size-readout">{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
                                     <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>

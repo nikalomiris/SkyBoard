@@ -1,4 +1,4 @@
-export type GridCellStyle = { color?: string; fontSize?: number; fontFamily?: string }
+export type GridCellStyle = { color?: string; fontSize?: number; fontFamily?: string; align?: 'left' | 'center' | 'right' }
 
 export type BoardItem = { id: string; scale?: number } & (
     | { type: 'stroke'; points: string; color: string; width: number; opacity: number }
