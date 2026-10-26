@@ -500,6 +500,12 @@ function App() {
             void supabase?.removeChannel(channel)
         }
     }, [shareSessionId, studentView])
+    // Lightweight page announcement so students follow even if the full state payload is dropped (e.g. too large).
+    useEffect(() => {
+        const channel = liveChannelRef.current
+        if (!shareSessionId || studentView || !channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'page', payload: { pageIndex, pages } })
+    }, [shareSessionId, studentView, pageIndex, pages])
     useEffect(() => {
         if (!shareSessionId || studentView) return
         const timeout = window.setTimeout(broadcastLiveState, 120)
@@ -589,6 +595,17 @@ function App() {
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
             setPageIndex(live.pageIndex)
             setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background })
+            setSelectedItemId(null)
+        })
+        channel.on('broadcast', { event: 'page' }, ({ payload }) => {
+            if (!admitted()) return
+            const live = payload as { pageIndex: number; pages: string[] }
+            if (!live || !Array.isArray(live.pages) || typeof live.pageIndex !== 'number') return
+            liveReceivedRef.current = true
+            setRemoteDraft(null)
+            setPages(live.pages)
+            setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
+            setPageIndex(live.pageIndex)
             setSelectedItemId(null)
         })
         channel.on('broadcast', { event: 'kick' }, ({ payload }) => {
