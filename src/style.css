@@ -2564,6 +2564,12 @@ kbd {
 
 .page-directory-actions {
     grid-column: 1 / -1;
+    position: sticky;
+    top: -8px;
+    z-index: 2;
+    margin: -8px -8px 0;
+    padding: 8px 8px 6px;
+    background: white;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -5851,4 +5857,27 @@ button.deck-chip.selected {
 
 .deck-canvas {
     position: relative;
+}
+
+.grid-text-toolbar>.grid-scope-group {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+}
+
+.grid-text-toolbar>.grid-scope-group>button {
+    height: 24px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: color-mix(in srgb, var(--accent) 85%, white);
+    font-size: 11px;
+}
+
+.grid-text-toolbar>.grid-scope-group>button.active,
+.grid-text-toolbar>button.active {
+    background: color-mix(in srgb, var(--accent) 16%, white);
+    color: color-mix(in srgb, var(--accent) 90%, black);
 }
