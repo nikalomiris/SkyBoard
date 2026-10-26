@@ -8,7 +8,30 @@ type StudentRow = { id: string; name: string; position: number; is_mock: boolean
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
 type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; card_deck: CardDeckConfig | null; is_mock: boolean; updated_at: string }
 type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[]; background: string }
-type AssetRow = { storage_path: string }
+type AssetRow = { storage_path: string; lesson_id: string; page_id: string | null }
+const defaultBackground = '#fffef9'
+const pageNameSeparator = '\u0000'
+
+// What the database is known to hold after the last load or save; used to send only changes.
+type SaveBaseline = {
+    ownerId: string
+    foldersKey: string
+    studentIdByName: Map<string, string>
+    folderIdByPath: Map<string, string>
+    lessonFingerprints: Map<string, string>
+    pageStructures: Map<string, string>
+    pages: Map<string, { items: BoardItem[] | undefined; background: string }>
+}
+let baseline: SaveBaseline | null = null
+
+function foldersKeyOf(folders: string[], lessons: Lesson[]) {
+    return JSON.stringify([folders, lessons.map((lesson) => [lesson.id, lesson.folder])])
+}
+
+function lessonFingerprint(lesson: Lesson, position: number) {
+    return JSON.stringify([position, lesson.title, lesson.folder, lesson.color, lesson.cover ?? null, lesson.coverImage ?? null, lesson.tags ?? [], lesson.cardDeck ?? null])
+}
+
 type AssetWriteRow = { owner_id: string; lesson_id: string; page_id: string; storage_path: string; file_name: string; content_type: string; size_bytes: number }
 
 function getClient() {
@@ -53,7 +76,12 @@ async function resolveAssetUrls(items: BoardItem[], cache: Map<string, string>) 
         let signedUrl = cache.get(item.storagePath)
         if (!signedUrl) {
             const result = await client.storage.from(assetBucket).createSignedUrl(item.storagePath, 60 * 60 * 24)
-            if (result.error) throw new Error(result.error.message)
+            if (result.error) {
+                if (!/not found/i.test(result.error.message)) throw new Error(result.error.message)
+                // The file is gone from storage; keep the item as an empty placeholder instead of blocking the whole workspace.
+                console.warn(`Missing asset in storage: ${item.storagePath}`)
+                return { ...item, src: '', storagePath: undefined }
+            }
             signedUrl = result.data.signedUrl
             cache.set(item.storagePath, signedUrl)
         }
@@ -147,6 +175,28 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         }
     }
 
+    for (const folder of folderRows) pathForFolder(folder.id)
+    const pages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
+    const pageStructures = new Map<string, string>()
+    for (const lesson of lessons) {
+        const hasStoredPages = (pagesByLesson.get(lesson.id) ?? []).length > 0
+        pageStructures.set(lesson.id, hasStoredPages ? lesson.pages.join(pageNameSeparator) : '')
+        if (!hasStoredPages) continue
+        for (let position = 0; position < lesson.pages.length; position += 1) {
+            const key = `${lesson.id}:${position}`
+            pages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
+        }
+    }
+    baseline = {
+        ownerId,
+        foldersKey: foldersKeyOf(folders, lessons),
+        studentIdByName: new Map(students.map((student) => [student.name.toLocaleLowerCase(), student.id])),
+        folderIdByPath: new Map([...pathByFolderId.entries()].map(([folderId, path]) => [path, folderId])),
+        lessonFingerprints: new Map(lessons.map((lesson, position) => [lesson.id, lessonFingerprint(lesson, position)])),
+        pageStructures,
+        pages,
+    }
+
     return {
         folders,
         mockStudentFolders: students.filter((student) => student.is_mock).map((student) => student.name),
@@ -206,7 +256,7 @@ async function storeAsset(ownerId: string, lessonId: string, pageId: string, ite
     return { ...item, src: `storage://${storagePath}`, storagePath }
 }
 
-export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage'], backgroundsByPage: WorkspaceData['backgroundsByPage']) {
+async function syncStudentsAndFolders(ownerId: string, folders: string[], lessons: Lesson[], known: SaveBaseline | null) {
     const client = getClient()
     const existingStudentsResult = await client.from('students').select('id,name,position').eq('owner_id', ownerId)
     const existingStudents = (await throwOnError(existingStudentsResult)) as StudentRow[]
@@ -272,16 +322,56 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
         folderIdByPath.set(path, existing.id)
     }
 
-    const existingLessonsResult = await client.from('lessons').select('id').eq('owner_id', ownerId)
-    const existingLessons = (await throwOnError(existingLessonsResult)) as { id: string }[]
+    // Only rows this client has loaded or saved may be removed; anything else in the database is left alone.
+    const knownFolderIds = new Set(known?.folderIdByPath.values() ?? [])
+    const knownStudentIds = new Set(known?.studentIdByName.values() ?? [])
+    const desiredFolderIds = new Set(folderIdByPath.values())
+    const staleFolders = existingFolders.filter((folder) => knownFolderIds.has(folder.id) && !desiredFolderIds.has(folder.id)).sort((first, second) => {
+        const firstPath = [...existingFolderPaths.entries()].find(([, value]) => value.id === first.id)?.[0] ?? ''
+        const secondPath = [...existingFolderPaths.entries()].find(([, value]) => value.id === second.id)?.[0] ?? ''
+        return secondPath.split(folderSeparator).length - firstPath.split(folderSeparator).length
+    })
+    const desiredStudentIds = new Set(rootNames.map((name) => studentsByName.get(name.toLocaleLowerCase())?.id).filter((value): value is string => Boolean(value)))
+    const staleStudents = existingStudents.filter((student) => knownStudentIds.has(student.id) && !desiredStudentIds.has(student.id))
+    return {
+        studentIdByName: new Map([...studentsByName.entries()].map(([name, student]) => [name, student.id])),
+        folderIdByPath,
+        async removeStale() {
+            for (const folder of staleFolders) {
+                const deleted = await client.from('student_folders').delete().eq('id', folder.id)
+                if (deleted.error) throw new Error(deleted.error.message)
+            }
+            for (const student of staleStudents) {
+                const deleted = await client.from('students').delete().eq('id', student.id)
+                if (deleted.error) throw new Error(deleted.error.message)
+            }
+        },
+    }
+}
+
+export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage'], backgroundsByPage: WorkspaceData['backgroundsByPage']) {
+    const client = getClient()
+    const known = baseline?.ownerId === ownerId ? baseline : null
+    const foldersKey = foldersKeyOf(folders, lessons)
+    let studentIdByName = known?.studentIdByName ?? new Map<string, string>()
+    let folderIdByPath = known?.folderIdByPath ?? new Map<string, string>()
+    let removeStaleHierarchy: (() => Promise<void>) | null = null
+    if (!known || known.foldersKey !== foldersKey) {
+        const synced = await syncStudentsAndFolders(ownerId, folders, lessons, known)
+        studentIdByName = synced.studentIdByName
+        folderIdByPath = synced.folderIdByPath
+        removeStaleHierarchy = synced.removeStale
+    }
+
+    const lessonFingerprints = new Map(lessons.map((lesson, position) => [lesson.id, lessonFingerprint(lesson, position)]))
     const lessonRows = lessons.map((lesson, position) => {
         const root = getFolderRoot(lesson.folder)
-        const student = studentsByName.get(root.toLocaleLowerCase())
-        if (!student) throw new Error(`The student for lesson ${lesson.title} could not be found.`)
+        const studentId = studentIdByName.get(root.toLocaleLowerCase())
+        if (!studentId) throw new Error(`The student for lesson ${lesson.title} could not be found.`)
         return {
             id: lesson.id,
             owner_id: ownerId,
-            student_id: student.id,
+            student_id: studentId,
             folder_id: getFolderParent(lesson.folder) ? folderIdByPath.get(lesson.folder) ?? null : null,
             title: lesson.title,
             position,
@@ -292,44 +382,74 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
             card_deck: lesson.cardDeck ?? null,
         }
     })
-    if (lessonRows.length) {
-        const upserted = await client.from('lessons').upsert(lessonRows, { onConflict: 'id' })
+    const changedLessonRows = lessonRows.filter((row) => known?.lessonFingerprints.get(row.id) !== lessonFingerprints.get(row.id))
+    if (changedLessonRows.length) {
+        const upserted = await client.from('lessons').upsert(changedLessonRows, { onConflict: 'id' })
         if (upserted.error) throw new Error(upserted.error.message)
     }
 
-    const existingPagesResult = await client.from('lesson_pages').select('id,lesson_id,position').eq('owner_id', ownerId)
-    const existingPages = (await throwOnError(existingPagesResult)) as { id: string; lesson_id: string; position: number }[]
-    const existingAssetsResult = await client.from('lesson_assets').select('storage_path').eq('owner_id', ownerId)
-    const existingAssets = (await throwOnError(existingAssetsResult)) as AssetRow[]
-    const existingAssetPaths = new Set(existingAssets.map((asset) => asset.storage_path))
-    const existingPageIds = new Map(existingPages.map((page) => [`${page.lesson_id}:${page.position}`, page.id]))
-    const desiredAssetPaths = new Set<string>()
-    const pendingAssets = new Map<string, AssetWriteRow>()
-    const pageRows = []
+    // A lesson is "complete" when its page list changed, so the server may drop its pages missing from the payload.
+    const completeLessonIds = new Set<string>()
+    const pagesToSave: { lessonId: string; position: number; name: string }[] = []
     for (const lesson of lessons) {
+        const complete = !known || known.pageStructures.get(lesson.id) !== lesson.pages.join(pageNameSeparator)
+        if (complete) completeLessonIds.add(lesson.id)
         for (const [position, name] of lesson.pages.entries()) {
-            const pageId = existingPageIds.get(`${lesson.id}:${position}`) ?? crypto.randomUUID()
-            const elements = await Promise.all((itemsByPage[`${lesson.id}:${position}`] ?? []).map((item) => storeAsset(ownerId, lesson.id, pageId, item, desiredAssetPaths, existingAssetPaths, pendingAssets)))
-            const background = backgroundsByPage[`${lesson.id}:${position}`] ?? '#fffef9'
-            pageRows.push({ id: pageId, owner_id: ownerId, lesson_id: lesson.id, name, position, elements, background })
+            const key = `${lesson.id}:${position}`
+            const previous = known?.pages.get(key)
+            if (complete || !previous || previous.items !== itemsByPage[key] || previous.background !== (backgroundsByPage[key] ?? defaultBackground)) pagesToSave.push({ lessonId: lesson.id, position, name })
         }
     }
-    const savedPages = await client.rpc('save_lesson_pages', { p_pages: pageRows.map(({ id, lesson_id, name, position, elements, background }) => ({ id, lesson_id, name, position, elements, background })) })
-    if (savedPages.error) throw new Error(savedPages.error.message)
-    if (pendingAssets.size) {
-        const upserted = await client.from('lesson_assets').upsert([...pendingAssets.values()], { onConflict: 'storage_path' })
-        if (upserted.error) throw new Error(upserted.error.message)
-    }
-
     const currentLessonIds = new Set(lessons.map((lesson) => lesson.id))
-    for (const lesson of existingLessons) {
-        if (!currentLessonIds.has(lesson.id)) {
-            const deleted = await client.from('lessons').delete().eq('id', lesson.id)
-            if (deleted.error) throw new Error(deleted.error.message)
+    const deletedLessonIds = new Set([...(known?.lessonFingerprints.keys() ?? [])].filter((lessonId) => !currentLessonIds.has(lessonId)))
+
+    const desiredAssetPaths = new Set<string>()
+    let existingAssets: AssetRow[] = []
+    if (pagesToSave.length || completeLessonIds.size || deletedLessonIds.size) {
+        const involvedLessonIds = [...new Set([...pagesToSave.map((page) => page.lessonId), ...completeLessonIds])]
+        const existingPages: { id: string; lesson_id: string; position: number }[] = involvedLessonIds.length
+            ? (await throwOnError(await client.from('lesson_pages').select('id,lesson_id,position').eq('owner_id', ownerId).in('lesson_id', involvedLessonIds))) as { id: string; lesson_id: string; position: number }[]
+            : []
+        const existingAssetsResult = await client.from('lesson_assets').select('storage_path,lesson_id,page_id').eq('owner_id', ownerId)
+        existingAssets = (await throwOnError(existingAssetsResult)) as AssetRow[]
+        const existingAssetPaths = new Set(existingAssets.map((asset) => asset.storage_path))
+        const existingPageIds = new Map(existingPages.map((page) => [`${page.lesson_id}:${page.position}`, page.id]))
+        const pendingAssets = new Map<string, AssetWriteRow>()
+        const pageRows = []
+        for (const { lessonId, position, name } of pagesToSave) {
+            const key = `${lessonId}:${position}`
+            const pageId = existingPageIds.get(key) ?? crypto.randomUUID()
+            const elements = await Promise.all((itemsByPage[key] ?? []).map((item) => storeAsset(ownerId, lessonId, pageId, item, desiredAssetPaths, existingAssetPaths, pendingAssets)))
+            pageRows.push({ id: pageId, lesson_id: lessonId, name, position, elements, background: backgroundsByPage[key] ?? defaultBackground })
+        }
+        if (pageRows.length || completeLessonIds.size) {
+            const savedPages = await client.rpc('save_lesson_pages_delta', { p_pages: pageRows, p_complete_lesson_ids: [...completeLessonIds] })
+            if (savedPages.error) throw new Error(savedPages.error.message)
+        }
+        if (pendingAssets.size) {
+            const upserted = await client.from('lesson_assets').upsert([...pendingAssets.values()], { onConflict: 'storage_path' })
+            if (upserted.error) throw new Error(upserted.error.message)
         }
     }
 
-    const staleAssetPaths = existingAssets.map((asset) => asset.storage_path).filter((path) => !desiredAssetPaths.has(path))
+    for (const lessonId of deletedLessonIds) {
+        const deleted = await client.from('lessons').delete().eq('id', lessonId)
+        if (deleted.error) throw new Error(deleted.error.message)
+    }
+
+    // Items can move between pages, so usage is judged across the whole lesson, never by an asset's recorded page.
+    const referencedPaths = new Set(desiredAssetPaths)
+    for (const lesson of lessons) {
+        for (let position = 0; position < lesson.pages.length; position += 1) {
+            for (const item of itemsByPage[`${lesson.id}:${position}`] ?? []) {
+                if ((item.type === 'image' || item.type === 'pdf') && item.storagePath) referencedPaths.add(item.storagePath)
+            }
+        }
+    }
+    const touchedLessonIds = new Set([...pagesToSave.map((page) => page.lessonId), ...completeLessonIds, ...deletedLessonIds])
+    const staleAssetPaths = existingAssets
+        .filter((asset) => touchedLessonIds.has(asset.lesson_id) && !referencedPaths.has(asset.storage_path))
+        .map((asset) => asset.storage_path)
     if (staleAssetPaths.length) {
         const removed = await client.storage.from(assetBucket).remove(staleAssetPaths)
         if (removed.error) throw new Error(removed.error.message)
@@ -337,23 +457,23 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
         if (deleted.error) throw new Error(deleted.error.message)
     }
 
-    const desiredFolderIds = new Set(folderIdByPath.values())
-    const staleFolders = existingFolders.filter((folder) => !desiredFolderIds.has(folder.id)).sort((first, second) => {
-        const firstPath = [...existingFolderPaths.entries()].find(([, value]) => value.id === first.id)?.[0] ?? ''
-        const secondPath = [...existingFolderPaths.entries()].find(([, value]) => value.id === second.id)?.[0] ?? ''
-        return secondPath.split(folderSeparator).length - firstPath.split(folderSeparator).length
-    })
-    for (const folder of staleFolders) {
-        const deleted = await client.from('student_folders').delete().eq('id', folder.id)
-        if (deleted.error) throw new Error(deleted.error.message)
-    }
+    await removeStaleHierarchy?.()
 
-    const desiredStudentIds = new Set(rootNames.map((name) => studentsByName.get(name.toLocaleLowerCase())?.id).filter((value): value is string => Boolean(value)))
-    for (const student of existingStudents) {
-        if (!desiredStudentIds.has(student.id)) {
-            const deleted = await client.from('students').delete().eq('id', student.id)
-            if (deleted.error) throw new Error(deleted.error.message)
+    const pages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
+    for (const lesson of lessons) {
+        for (let position = 0; position < lesson.pages.length; position += 1) {
+            const key = `${lesson.id}:${position}`
+            pages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
         }
+    }
+    baseline = {
+        ownerId,
+        foldersKey,
+        studentIdByName,
+        folderIdByPath,
+        lessonFingerprints,
+        pageStructures: new Map(lessons.map((lesson) => [lesson.id, lesson.pages.join(pageNameSeparator)])),
+        pages,
     }
 }
 

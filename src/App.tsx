@@ -18,7 +18,7 @@ import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
 import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, TEXT_LINE_HEIGHT } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { addLibraryBackground, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
+import { addLibraryBackground, backgroundImageMaxDimension, coverImageMaxDimension, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
@@ -821,19 +821,21 @@ function App() {
         const nextPageIndex = pageIndex === fromIndex ? toIndex :
             fromIndex < pageIndex && toIndex >= pageIndex ? pageIndex - 1 :
                 fromIndex > pageIndex && toIndex <= pageIndex ? pageIndex + 1 : pageIndex
-        setItemsByPage((previous) => {
+        const movedIndex = (oldIndex: number) => oldIndex === fromIndex ? toIndex :
+            fromIndex < toIndex && oldIndex > fromIndex && oldIndex <= toIndex ? oldIndex - 1 :
+                fromIndex > toIndex && oldIndex >= toIndex && oldIndex < fromIndex ? oldIndex + 1 : oldIndex
+        const remapByPage = <T,>(previous: Record<string, T>) => {
             const reordered = { ...previous }
             pages.forEach((_, oldIndex) => {
                 const oldKey = `${openLesson.id}:${oldIndex}`
-                const newIndex = oldIndex === fromIndex ? toIndex :
-                    fromIndex < toIndex && oldIndex > fromIndex && oldIndex <= toIndex ? oldIndex - 1 :
-                        fromIndex > toIndex && oldIndex >= toIndex && oldIndex < fromIndex ? oldIndex + 1 : oldIndex
-                const newKey = `${openLesson.id}:${newIndex}`
-                if (previous[oldKey]) reordered[newKey] = previous[oldKey]
+                const newKey = `${openLesson.id}:${movedIndex(oldIndex)}`
+                if (previous[oldKey] !== undefined) reordered[newKey] = previous[oldKey]
                 else delete reordered[newKey]
             })
             return reordered
-        })
+        }
+        setItemsByPage(remapByPage)
+        setBackgroundsByPage(remapByPage)
         updateLessonPages(renumberDefaultPages(nextPages))
         setPageIndex(nextPageIndex)
         setSelectedItemId(null)
@@ -1110,13 +1112,11 @@ function App() {
         const file = event.target.files?.[0]
         event.target.value = ''
         if (!file || !file.type.startsWith('image/') || !coverEditorLessonId) return
-        const reader = new FileReader()
-        reader.onload = () => {
-            const coverImage = String(reader.result)
-            setLessons((previous) => previous.map((lesson) => lesson.id === coverEditorLessonId ? { ...lesson, cover: 'custom', coverImage } : lesson))
+        const lessonId = coverEditorLessonId
+        void downscaleImage(file, coverImageMaxDimension).then((coverImage) => {
+            setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cover: 'custom', coverImage } : lesson))
             setCoverEditorLessonId(null)
-        }
-        reader.readAsDataURL(file)
+        }).catch(() => undefined)
     }
 
     function addLessonTag() {
@@ -1768,7 +1768,7 @@ function App() {
         const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || file.type.startsWith('image/'))
         input.value = ''
         if (!files.length) return
-        const readFile = (file: File) => file.type.startsWith('image/') && file.type !== 'image/svg+xml' && file.size > 300 * 1024
+        const readFile = (file: File) => file.type.startsWith('image/') && file.type !== 'image/svg+xml'
             ? downscaleImage(file).catch(() => readOriginal(file))
             : readOriginal(file)
         const readOriginal = (file: File) => new Promise<string>((resolve, reject) => {
@@ -1835,7 +1835,7 @@ function App() {
         event.target.value = ''
         if (!file || !file.type.startsWith('image/')) return
         try {
-            const src = await downscaleImage(file)
+            const src = await downscaleImage(file, backgroundImageMaxDimension)
             setBackgroundDraft({ src, fit: 'fill', scope: backgroundScope, name: file.name.replace(/\.[^.]+$/, '') || 'Background', group: '', newGroup: '' })
             setShowBackgrounds(false)
         } catch (error) {
@@ -2055,7 +2055,7 @@ function App() {
                 </foreignObject>
             )
         }
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
@@ -2141,68 +2141,68 @@ function App() {
                         <div className="library-heading-row"><div><p className="eyebrow">LESSON LIBRARY</p>{activeFolder === 'All lessons' ? <h1>Your lessons</h1> : activeFolder === 'Shared with me' ? <h1>{activeFolder}</h1> : <nav className="library-breadcrumbs" aria-label="Breadcrumb"><button onClick={() => setActiveFolder('All lessons')}>Your lessons</button><ChevronRight size={14} aria-hidden="true" />{getFolderParent(activeFolder) && <><button onClick={() => setActiveFolder(getFolderParent(activeFolder)!)}>{getFolderParent(activeFolder)}</button><ChevronRight size={14} aria-hidden="true" /></>}<span aria-current="page">{getFolderName(activeFolder)}</span></nav>}<p className="library-subtitle">A little structure makes room for big learning.</p></div><button className="folder-create-button" onClick={handleNewFolderButton}><FolderPlus size={16} /> {isStudentFolderSelected ? 'New folder' : 'New student'}</button></div>
                         <div className="library-controls"><div className="search-box"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search lessons or students" aria-label="Search lessons or students" /><kbd>⌘ K</kbd></div><div className="control-right"><button className={`view-toggle ${viewMode === 'grid' ? 'selected' : ''}`} onClick={() => setViewMode('grid')} aria-label="Grid view" title="Grid view"><LayoutGrid size={17} /></button><button className={`view-toggle ${viewMode === 'list' ? 'selected' : ''}`} onClick={() => setViewMode('list')} aria-label="List view" title="List view"><List size={17} /></button><div className="sort-wrap" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSortMenuOpen(false) }}><button className="sort-button" aria-haspopup="listbox" aria-expanded={sortMenuOpen} onClick={() => setSortMenuOpen((open) => !open)}><span>{sortLabels[sortKey]}</span><ChevronDown size={15} /></button>{sortMenuOpen && <div className="sort-menu" role="listbox" aria-label="Sort lessons">{(Object.keys(sortLabels) as LessonSortKey[]).map((key) => <button key={key} role="option" aria-selected={sortKey === key} className={sortKey === key ? 'selected' : ''} onClick={() => { setSortKey(key); setSortMenuOpen(false) }}><span>{sortLabels[key]}</span>{sortKey === key && <Check size={14} />}</button>)}</div>}</div></div></div>
                         <div className="library-scroll">
-                        {liveLessonIds.length > 0 && !isMockWorkspace && <section className="live-section" aria-label="Live lessons"><div className="subfolder-section-heading"><span className="live-heading"><span className="live-pulse" />Live now</span><span>{liveLessonIds.length}</span></div><div className="live-grid">{lessons.filter((lesson) => liveLessonIds.includes(lesson.id)).map((lesson) => <button type="button" className="live-card" key={lesson.id} onClick={() => openBoard(lesson)}><span className="live-badge"><span className="live-pulse" />LIVE</span><span className="live-card-copy"><strong>{lesson.title}</strong><span>{lesson.folder.split(folderSeparator, 1)[0]}</span></span><span className="live-card-action">Rejoin <ChevronRight size={15} /></span></button>)}</div></section>}
-                        {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
-                            <div className="subfolder-section-heading"><span>Subfolders</span><span>{visibleSubfolders.length}</span></div>
-                            <div className="subfolder-grid">
-                                {visibleSubfolders.map((folder) => {
-                                    const lessonCount = lessons.filter((lesson) => folderIsWithin(lesson.folder, folder)).length
-                                    return <button type="button" className="subfolder-card" key={folder} onClick={() => setActiveFolder(folder)}>
-                                        <span className="subfolder-card-icon"><Folder size={16} /></span>
-                                        <span className="subfolder-card-copy"><strong>{getFolderName(folder)}</strong><span>{lessonCount} {lessonCount === 1 ? 'lesson' : 'lessons'}</span></span>
-                                        <ChevronRight size={15} />
-                                    </button>
-                                })}
-                            </div>
-                        </section>}
-                        <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>Sorted by {sortLabels[sortKey]}</span></div>
-                        {visibleLessons.length > 0 ? <div className={`lesson-grid ${viewMode === 'list' ? 'list-view' : ''}`}>
-                            {visibleLessons.map((lesson) => {
-                                const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
-                                const cover = lesson.cover ?? legacyCover
-                                const studentFolder = lesson.folder.split(folderSeparator, 1)[0]
-                                const studentFolderIndex = orderedFolders.indexOf(studentFolder)
-                                return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                    {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
-                                    <div className="lesson-info">
-                                        <div className="lesson-name-line">
-                                            {renamingLessonId === lesson.id ? (
-                                                <input
-                                                    className="lesson-rename-input"
-                                                    autoFocus
-                                                    value={renameValue}
-                                                    onClick={(event) => event.stopPropagation()}
-                                                    onChange={(event) => setRenameValue(event.target.value)}
-                                                    onBlur={() => commitLessonRename(lesson.id)}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === 'Enter') { event.preventDefault(); commitLessonRename(lesson.id) }
-                                                        if (event.key === 'Escape') { event.stopPropagation(); cancelLessonRename() }
-                                                    }}
-                                                />
-                                            ) : <h2>{lesson.title}{(lesson.isMock || isMockWorkspace && mockLessonIds.has(lesson.id)) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
-                                            <div className="menu-anchor">
-                                                <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
-                                                {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
-                                                    <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
-                                                    <button onClick={() => openDuplicateLessonDialog(lesson)}><Copy size={15} /> Make a copy</button>
-                                                    <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
-                                                    <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
-                                                    <div className="menu-divider" />
-                                                    <span className="menu-label">Move to</span>
-                                                    {getOrderedFolders(folders).map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}
-                                                    <div className="menu-divider" />
-                                                    <button className="danger-option" onClick={() => { setDeleteConfirmation({ type: 'lesson', lessonId: lesson.id }); setShowFileMenu(null) }}><Trash2 size={14} /> Delete lesson</button>
-                                                </div>}
+                            {liveLessonIds.length > 0 && !isMockWorkspace && <section className="live-section" aria-label="Live lessons"><div className="subfolder-section-heading"><span className="live-heading"><span className="live-pulse" />Live now</span><span>{liveLessonIds.length}</span></div><div className="live-grid">{lessons.filter((lesson) => liveLessonIds.includes(lesson.id)).map((lesson) => <button type="button" className="live-card" key={lesson.id} onClick={() => openBoard(lesson)}><span className="live-badge"><span className="live-pulse" />LIVE</span><span className="live-card-copy"><strong>{lesson.title}</strong><span>{lesson.folder.split(folderSeparator, 1)[0]}</span></span><span className="live-card-action">Rejoin <ChevronRight size={15} /></span></button>)}</div></section>}
+                            {visibleSubfolders.length > 0 && <section className="subfolder-section" aria-label={`${activeFolder} subfolders`}>
+                                <div className="subfolder-section-heading"><span>Subfolders</span><span>{visibleSubfolders.length}</span></div>
+                                <div className="subfolder-grid">
+                                    {visibleSubfolders.map((folder) => {
+                                        const lessonCount = lessons.filter((lesson) => folderIsWithin(lesson.folder, folder)).length
+                                        return <button type="button" className="subfolder-card" key={folder} onClick={() => setActiveFolder(folder)}>
+                                            <span className="subfolder-card-icon"><Folder size={16} /></span>
+                                            <span className="subfolder-card-copy"><strong>{getFolderName(folder)}</strong><span>{lessonCount} {lessonCount === 1 ? 'lesson' : 'lessons'}</span></span>
+                                            <ChevronRight size={15} />
+                                        </button>
+                                    })}
+                                </div>
+                            </section>}
+                            <div className="library-label-row"><span>{visibleLessons.length} lessons</span><span>Sorted by {sortLabels[sortKey]}</span></div>
+                            {visibleLessons.length > 0 ? <div className={`lesson-grid ${viewMode === 'list' ? 'list-view' : ''}`}>
+                                {visibleLessons.map((lesson) => {
+                                    const legacyCover = lesson.id.includes('blends') ? 'blends' : lesson.id.includes('syllables') ? 'safari' : lesson.id.includes('vce') ? 'magic' : 'vowels'
+                                    const cover = lesson.cover ?? legacyCover
+                                    const studentFolder = lesson.folder.split(folderSeparator, 1)[0]
+                                    const studentFolderIndex = orderedFolders.indexOf(studentFolder)
+                                    return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
+                                        {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
+                                        <div className="lesson-info">
+                                            <div className="lesson-name-line">
+                                                {renamingLessonId === lesson.id ? (
+                                                    <input
+                                                        className="lesson-rename-input"
+                                                        autoFocus
+                                                        value={renameValue}
+                                                        onClick={(event) => event.stopPropagation()}
+                                                        onChange={(event) => setRenameValue(event.target.value)}
+                                                        onBlur={() => commitLessonRename(lesson.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === 'Enter') { event.preventDefault(); commitLessonRename(lesson.id) }
+                                                            if (event.key === 'Escape') { event.stopPropagation(); cancelLessonRename() }
+                                                        }}
+                                                    />
+                                                ) : <h2>{lesson.title}{(lesson.isMock || isMockWorkspace && mockLessonIds.has(lesson.id)) && <span className="demo-tag" title="Sample lesson">Demo</span>}</h2>}
+                                                <div className="menu-anchor">
+                                                    <button className="card-menu-button" aria-label={`Options for ${lesson.title}`} onClick={(event) => { event.stopPropagation(); setShowFileMenu(showFileMenu === lesson.id ? null : lesson.id) }}><MoreHorizontal size={18} /></button>
+                                                    {showFileMenu === lesson.id && <div className="file-menu" onClick={(event) => event.stopPropagation()}>
+                                                        <button onClick={() => startRenameLesson(lesson)}><Pencil size={14} /> Rename</button>
+                                                        <button onClick={() => openDuplicateLessonDialog(lesson)}><Copy size={15} /> Make a copy</button>
+                                                        <button onClick={() => openTagEditor(lesson)}><Tag size={14} /> Edit tags</button>
+                                                        <button onClick={() => openCoverEditor(lesson)}><FileImage size={14} /> Edit cover</button>
+                                                        <div className="menu-divider" />
+                                                        <span className="menu-label">Move to</span>
+                                                        {getOrderedFolders(folders).map((folder) => <button key={folder} onClick={() => moveLesson(lesson.id, folder)}><Folder size={14} /> {folder}</button>)}
+                                                        <div className="menu-divider" />
+                                                        <button className="danger-option" onClick={() => { setDeleteConfirmation({ type: 'lesson', lessonId: lesson.id }); setShowFileMenu(null) }}><Trash2 size={14} /> Delete lesson</button>
+                                                    </div>}
+                                                </div>
                                             </div>
+                                            <div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span><span className={`lesson-folder${studentFolderIndex >= 0 ? ` student-folder-${studentFolderIndex % 4}` : ''}`} title={`Student: ${studentFolder}`}><Folder size={13} className={studentFolderIndex >= 0 ? `folder-color folder-${studentFolderIndex % 4}` : ''} /><span>{studentFolder}</span></span></div>
+                                            {Boolean(lesson.tags?.length) && <div className="lesson-tags" aria-label={`Tags for ${lesson.title}`}>{lesson.tags?.map((tag) => <span className="lesson-tag" key={tag}>{tag}</span>)}</div>}
                                         </div>
-                                        <div className="lesson-meta"><span className="lesson-file-icon"><NotebookTabs size={14} /></span><span>{lesson.pages.length} pages</span><span className="meta-dot">·</span><span>{lesson.updated}</span><span className={`lesson-folder${studentFolderIndex >= 0 ? ` student-folder-${studentFolderIndex % 4}` : ''}`} title={`Student: ${studentFolder}`}><Folder size={13} className={studentFolderIndex >= 0 ? `folder-color folder-${studentFolderIndex % 4}` : ''} /><span>{studentFolder}</span></span></div>
-                                        {Boolean(lesson.tags?.length) && <div className="lesson-tags" aria-label={`Tags for ${lesson.title}`}>{lesson.tags?.map((tag) => <span className="lesson-tag" key={tag}>{tag}</span>)}</div>}
-                                    </div>
-                                </article>
-                            })}
-                            <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
-                        </div> : search.trim() ? <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div> : <div className="lesson-grid"><button className="new-lesson-card empty-folder-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Create new</strong><span>{activeFolder === 'All lessons' || activeFolder === 'Shared with me' ? 'Start your first lesson' : 'This folder is empty — start a lesson here'}</span></button></div>}
-                        <div className="library-footer"><span>Made for the moments when it clicks.</span><span><span className="footer-sparkle">✳</span> SkyBoard for learning</span></div>
+                                    </article>
+                                })}
+                                <button className="new-lesson-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Start with a blank lesson</strong><span>Build a new teaching moment</span></button>
+                            </div> : search.trim() ? <div className="empty-state"><div className="empty-icon"><Search size={22} /></div><strong>No lessons found</strong><span>Try a different search or choose another folder.</span></div> : <div className="lesson-grid"><button className="new-lesson-card empty-folder-card" onClick={openNewLessonDialog}><span className="new-lesson-icon"><Plus size={20} /></span><strong>Create new</strong><span>{activeFolder === 'All lessons' || activeFolder === 'Shared with me' ? 'Start your first lesson' : 'This folder is empty — start a lesson here'}</span></button></div>}
+                            <div className="library-footer"><span>Made for the moments when it clicks.</span><span><span className="footer-sparkle">✳</span> SkyBoard for learning</span></div>
                         </div>
                     </main>
                 </div>
@@ -2214,7 +2214,7 @@ function App() {
                         {<>
                             {toolList.filter(({ id: toolId }) => !studentView || studentToolIds.includes(toolId)).map(({ id: toolId, label, icon: Icon }) => <button key={toolId} data-tool-id={toolId} disabled={studentView && studentLocked} className={`tool-button ${activeTool === toolId ? 'selected' : ''}`} aria-label={label} title={label} onClick={() => { if (studentView && activeTool === toolId) { setActiveTool('select'); return } setActiveTool(toolId); if (toolId !== 'select') { setSelectedItemId(null); setActiveGridCell(null) } setShowToolOptions(toolId === 'shape') }}><Icon size={19} /></button>)}
                             {!studentView && <><div className="rail-spacer" />
-                            <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}</>}
+                                <button className={`tool-button ${showBackgrounds ? 'selected' : ''}`} aria-label="Set background" title="Set background" onClick={() => setShowBackgrounds(!showBackgrounds)}><Settings2 size={19} /></button></>}</>}
                     </aside>
                     <main className="board-main">
                         <div className={`board-toolbar ${studentView ? 'student-view-toolbar' : ''}`}>
@@ -2275,44 +2275,46 @@ function App() {
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Upload image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleBackgroundImage(event)} />{backgroundLibraryError && <p className="form-error" role="alert">{backgroundLibraryError}</p>}{backgroundLibrary.length > 0 && <div className="background-library"><span className="panel-small-label">YOUR BACKGROUNDS</span>{[...new Set(backgroundLibrary.map((entry) => entry.group))].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b)).map((group) => <div key={group} className="background-library-group" role="group" aria-label={group || 'Ungrouped'}>{group && <span className="background-library-group-name">{group}</span>}<div className="background-library-grid">{backgroundLibrary.filter((entry) => entry.group === group).map((entry) => <div key={entry.id} className="background-library-item"><button type="button" title={`Use ${entry.name}`} aria-label={`Use ${entry.name} background`} style={{ backgroundImage: `url("${entry.image}")` }} onClick={() => { setBackgroundDraft({ src: entry.image, fit: 'fill', scope: backgroundScope, libraryId: entry.id, name: entry.name, group: entry.group, newGroup: '' }); setShowBackgrounds(false) }} /><button type="button" className="background-library-remove" title={`Remove ${entry.name} from library`} aria-label={`Remove ${entry.name} from library`} onClick={() => void deleteLibraryBackground(entry)}><X size={12} /></button></div>)}</div></div>)}</div>}<div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
-            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
+                            {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
-                            {renderSelectedItemToolbar()}
-                            {renderToolColorToolbar()}
-                            {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
-                                <span>Cell {activeGridCell.index + 1}</span>
-                                <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
-                                <span className="size-readout">{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
-                                <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
-                                <select className="selection-font-picker" value={selectedGridCellStyle?.fontFamily ?? selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Cell text font" title="Cell text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
-                            </div>}
-                            {!studentView && selectedItem?.type === 'note' && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
-                                <span>Note text</span>
-                                <button type="button" title="Decrease note text size" aria-label="Decrease note text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
-                                <span className="size-readout">{selectedItem.fontSize ?? 14}px</span>
-                                <button type="button" title="Increase note text size" aria-label="Increase note text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
-                                <select className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Note text font" title="Note text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
-                            </div>}
-                            {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>{([['left', 'Align left', AlignLeft], ['center', 'Align center', AlignCenter], ['right', 'Align right', AlignRight]] as const).map(([value, label, Icon]) => <button key={value} type="button" role="radio" aria-checked={(selectedItem.align ?? 'center') === value} className={(selectedItem.align ?? 'center') === value ? 'active' : ''} aria-label={label} title={label} onClick={() => setSelectedTextAlign(value)}><Icon size={15} /></button>)}</div>}
+                                {renderSelectedItemToolbar()}
+                                {renderToolColorToolbar()}
+                                {!studentView && selectedItem?.type === 'grid' && activeGridCell && activeGridCell.itemId === selectedItem.id && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                                    <span>Cell {activeGridCell.index + 1}</span>
+                                    <button type="button" title="Decrease cell text size" aria-label="Decrease cell text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                    <span className="size-readout">{selectedGridCellStyle?.fontSize ?? selectedItem.fontSize ?? 20}px</span>
+                                    <button type="button" title="Increase cell text size" aria-label="Increase cell text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
+                                    <select className="selection-font-picker" value={selectedGridCellStyle?.fontFamily ?? selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Cell text font" title="Cell text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
+                                </div>}
+                                {!studentView && selectedItem?.type === 'note' && <div className="grid-text-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+                                    <span>Note text</span>
+                                    <button type="button" title="Decrease note text size" aria-label="Decrease note text size" onClick={() => adjustSelectedTextSize(-2)}><Minus size={14} /></button>
+                                    <span className="size-readout">{selectedItem.fontSize ?? 14}px</span>
+                                    <button type="button" title="Increase note text size" aria-label="Increase note text size" onClick={() => adjustSelectedTextSize(2)}><Plus size={14} /></button>
+                                    <select className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Note text font" title="Note text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>
+                                </div>}
+                                {!studentView && selectedItem?.type === 'text' && <div className="text-font-toolbar" onPointerDown={(event) => event.stopPropagation()}><label htmlFor="selected-text-font">Font</label><select id="selected-text-font" className="selection-font-picker" value={selectedItem.fontFamily ?? defaultTextFont} onChange={(event) => setSelectedFontFamily(event.target.value)} aria-label="Text font">{textFontOptions.map((font) => <option key={font.label} value={font.value}>{font.label}</option>)}</select>{([['left', 'Align left', AlignLeft], ['center', 'Align center', AlignCenter], ['right', 'Align right', AlignRight]] as const).map(([value, label, Icon]) => <button key={value} type="button" role="radio" aria-checked={(selectedItem.align ?? 'center') === value} className={(selectedItem.align ?? 'center') === value ? 'active' : ''} aria-label={label} title={label} onClick={() => setSelectedTextAlign(value)}><Icon size={15} /></button>)}</div>}
                             </div>
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} onPointerLeave={() => setHoverVisible(false)} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? (() => { const b = getItemBounds(item); const ls = item.size * (item.scale ?? 1); const w = Math.max(220, b.width + 40); const a = item.align ?? 'center'; const x = a === 'left' ? b.left - 5 : a === 'right' ? b.left + b.width + 5 - w : b.left + b.width / 2 - w / 2; return <foreignObject x={x} y={b.top + ls * 0.15 - 3} width={w} height={item.text.split('\n').length * ls * TEXT_LINE_HEIGHT + 6}><textarea
-                                            className="board-text-input"
-                                            autoFocus
-                                            value={item.text}
-                                            placeholder="Type here…"
-                                            style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: item.fontFamily ?? defaultTextFont, lineHeight: TEXT_LINE_HEIGHT, textAlign: item.align ?? 'center' }}
-                                            onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
-                                            onBlur={(event) => {
-                                                const nextFocus = event.relatedTarget
-                                                if (nextFocus instanceof HTMLElement && nextFocus.closest('.selection-toolbar, .text-font-toolbar')) return
-                                                setEditingTextId(null)
-                                                if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id))
-                                            }}
-                                            onKeyDown={(event) => { if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur() } }}
-                                        /></foreignObject> })() : renderBoardItem(item)}</g>)}
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? (() => {
+                                            const b = getItemBounds(item); const ls = item.size * (item.scale ?? 1); const w = Math.max(220, b.width + 40); const a = item.align ?? 'center'; const x = a === 'left' ? b.left - 5 : a === 'right' ? b.left + b.width + 5 - w : b.left + b.width / 2 - w / 2; return <foreignObject x={x} y={b.top + ls * 0.15 - 3} width={w} height={item.text.split('\n').length * ls * TEXT_LINE_HEIGHT + 6}><textarea
+                                                className="board-text-input"
+                                                autoFocus
+                                                value={item.text}
+                                                placeholder="Type here…"
+                                                style={{ color: item.color, fontSize: `${item.size * (item.scale ?? 1)}px`, fontFamily: item.fontFamily ?? defaultTextFont, lineHeight: TEXT_LINE_HEIGHT, textAlign: item.align ?? 'center' }}
+                                                onChange={(event) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'text' ? { ...candidate, text: event.target.value } : candidate), { recordHistory: false })}
+                                                onBlur={(event) => {
+                                                    const nextFocus = event.relatedTarget
+                                                    if (nextFocus instanceof HTMLElement && nextFocus.closest('.selection-toolbar, .text-font-toolbar')) return
+                                                    setEditingTextId(null)
+                                                    if (!item.text.trim()) updateCurrentItems((items) => items.filter((candidate) => candidate.id !== item.id))
+                                                }}
+                                                onKeyDown={(event) => { if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur() } }}
+                                            /></foreignObject>
+                                        })() : renderBoardItem(item)}</g>)}
                                         {selectedItem && selectedItem.id !== editingTextId && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
@@ -2342,7 +2344,7 @@ function App() {
                                             return <circle className="eraser-cursor" cx={lastX} cy={lastY} r={toolSizes.eraser / 2} pointerEvents="none" />
                                         })()}
                                         {currentPoints && (drawing || activeTool === 'laser') && activeTool !== 'eraser' && <path className={activeTool === 'laser' ? `laser-stroke${laserFading ? ' fading' : ''}` : ''} d={smoothPath(currentPoints)} fill="none" stroke={activeTool === 'laser' ? '#ef6b58' : ink} strokeWidth={toolSizes[activeTool as SizedTool] ?? 3} strokeOpacity={toolOpacity[activeTool as SizedTool] ?? 1} strokeLinecap="round" strokeLinejoin="round" />}
-                                                                                {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
+                                        {remoteDraft && remoteDraft.pageIndex === pageIndex && remoteDraft.kind !== 'ink' && (() => {
                                             const remotePoints = parsePoints(remoteDraft.points)
                                             const [lastX, lastY] = remotePoints[remotePoints.length - 1]
                                             return remoteDraft.kind === 'eraser'
@@ -2395,14 +2397,14 @@ function App() {
                 <h2>Image background</h2>
                 <p>Choose how the image fits the page.</p>
                 <div className="background-image-body"><div className="background-image-main">
-                <div className="background-image-preview" aria-label="Background preview" style={{ background: backgroundImageCss(backgroundDraft.src, backgroundDraft.fit) }} />
-                <div className="new-lesson-field"><span>Image fit</span><div className="background-scope background-fit" role="radiogroup" aria-label="Image fit">{([['fill', 'Fill'], ['fit', 'Fit'], ['stretch', 'Stretch'], ['center', 'Center'], ['tile', 'Tile']] as const).map(([fit, label]) => <button type="button" key={fit} role="radio" aria-checked={backgroundDraft.fit === fit} className={backgroundDraft.fit === fit ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, fit })}>{label}</button>)}</div></div>
+                    <div className="background-image-preview" aria-label="Background preview" style={{ background: backgroundImageCss(backgroundDraft.src, backgroundDraft.fit) }} />
+                    <div className="new-lesson-field"><span>Image fit</span><div className="background-scope background-fit" role="radiogroup" aria-label="Image fit">{([['fill', 'Fill'], ['fit', 'Fit'], ['stretch', 'Stretch'], ['center', 'Center'], ['tile', 'Tile']] as const).map(([fit, label]) => <button type="button" key={fit} role="radio" aria-checked={backgroundDraft.fit === fit} className={backgroundDraft.fit === fit ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, fit })}>{label}</button>)}</div></div>
                 </div><div className="background-image-side">
-                {!backgroundDraft.libraryId && <><label className="new-lesson-field">Save to library as<input value={backgroundDraft.name} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, name: event.target.value })} maxLength={80} /></label>
-                <label className="new-lesson-field">Group<select value={backgroundDraft.group} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, group: event.target.value })}><option value="">No group</option>{[...new Set(backgroundLibrary.map((entry) => entry.group).filter(Boolean))].map((group) => <option key={group} value={group}>{group}</option>)}<option value="__new__">New group…</option></select></label>
-                {backgroundDraft.group === '__new__' && <label className="new-lesson-field">New group name<input value={backgroundDraft.newGroup} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, newGroup: event.target.value })} maxLength={60} /></label>}</>}
-                <div className="new-lesson-field"><span>Apply to</span><div className="background-scope background-fit" role="radiogroup" aria-label="Apply to"><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'current'} className={backgroundDraft.scope === 'current' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'current' })}>Current page</button><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'all'} className={backgroundDraft.scope === 'all' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'all' })}>All pages in lesson</button></div></div>
-                </div></div>
+                        {!backgroundDraft.libraryId && <><label className="new-lesson-field">Save to library as<input value={backgroundDraft.name} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, name: event.target.value })} maxLength={80} /></label>
+                            <label className="new-lesson-field">Group<select value={backgroundDraft.group} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, group: event.target.value })}><option value="">No group</option>{[...new Set(backgroundLibrary.map((entry) => entry.group).filter(Boolean))].map((group) => <option key={group} value={group}>{group}</option>)}<option value="__new__">New group…</option></select></label>
+                            {backgroundDraft.group === '__new__' && <label className="new-lesson-field">New group name<input value={backgroundDraft.newGroup} onChange={(event) => setBackgroundDraft({ ...backgroundDraft, newGroup: event.target.value })} maxLength={60} /></label>}</>}
+                        <div className="new-lesson-field"><span>Apply to</span><div className="background-scope background-fit" role="radiogroup" aria-label="Apply to"><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'current'} className={backgroundDraft.scope === 'current' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'current' })}>Current page</button><button type="button" role="radio" aria-checked={backgroundDraft.scope === 'all'} className={backgroundDraft.scope === 'all' ? 'active' : ''} onClick={() => setBackgroundDraft({ ...backgroundDraft, scope: 'all' })}>All pages in lesson</button></div></div>
+                    </div></div>
                 {backgroundDraft.error && <p className="form-error" role="alert">{backgroundDraft.error}</p>}
                 <div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setBackgroundDraft(null)}>Cancel</button><button type="submit" className="confirm-button" disabled={backgroundDraft.busy || (backgroundDraft.group === '__new__' && !backgroundDraft.newGroup.trim())}>{backgroundDraft.busy ? 'Saving…' : 'Set background'}</button></div>
             </form></div>}

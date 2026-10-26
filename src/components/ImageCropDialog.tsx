@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Check, Crop, X } from 'lucide-react'
+import { boardImageMaxDimension, imageQuality } from '../lib/backgroundLibrary'
 
 type Rect = { x: number; y: number; w: number; h: number }
 type Props = {
@@ -71,12 +72,15 @@ export default function ImageCropDialog({ src, label, remaining, editing, onConf
             const sx = Math.round(rect.x * image.naturalWidth), sy = Math.round(rect.y * image.naturalHeight)
             const sw = Math.max(1, Math.round(rect.w * image.naturalWidth)), sh = Math.max(1, Math.round(rect.h * image.naturalHeight))
             if (sw === image.naturalWidth && sh === image.naturalHeight && src.startsWith('data:')) { onConfirm(src); return }
-            const scale = Math.min(1, 1920 / Math.max(sw, sh))
+            const scale = Math.min(1, boardImageMaxDimension / Math.max(sw, sh))
             const canvas = document.createElement('canvas')
             canvas.width = Math.max(1, Math.round(sw * scale))
             canvas.height = Math.max(1, Math.round(sh * scale))
-            canvas.getContext('2d')!.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
-            onConfirm(canvas.toDataURL(/^data:image\/png/.test(src) ? 'image/png' : 'image/jpeg', 0.85))
+            const context = canvas.getContext('2d')!
+            context.fillStyle = '#fff'
+            context.fillRect(0, 0, canvas.width, canvas.height)
+            context.drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+            onConfirm(canvas.toDataURL('image/jpeg', imageQuality))
         } catch {
             setError('This image cannot be cropped because its website blocks it. Close this dialog to keep the original.')
             setBusy(false)
