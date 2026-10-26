@@ -179,7 +179,7 @@ export function resizeBoardItem(item: BoardItem, factor: number, handle?: Resize
             const scaledBounds = getItemBounds(scaledStroke)
             return moveBoardItem(scaledStroke, anchorX - (handle.endsWith('left') ? scaledBounds.left + scaledBounds.width : scaledBounds.left), anchorY - (handle.startsWith('top') ? scaledBounds.top + scaledBounds.height : scaledBounds.top))
         }
-        const scale = Math.max(0.35, (item.scale ?? 1) * resizeFactor)
+        const scale = Math.max(item.type === 'image' ? 0.01 : 0.35, (item.scale ?? 1) * resizeFactor)
         const scaledItem = { ...item, scale }
         if (!handle) return scaledItem
         const anchorX = handle.endsWith('left') ? bounds.left + bounds.width : bounds.left

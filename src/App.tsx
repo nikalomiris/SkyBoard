@@ -1717,7 +1717,7 @@ function App() {
                     const dimension = Math.max(1, gesture.bounds.width + gesture.bounds.height)
                     const horizontalDirection = gesture.handle.endsWith('right') ? 1 : -1
                     const verticalDirection = gesture.handle.startsWith('bottom') ? 1 : -1
-                    const factor = Math.max(0.35, 1 + (deltaX * horizontalDirection + deltaY * verticalDirection) / dimension)
+                    const factor = Math.max(gesture.item.type === 'image' ? 0.01 : 0.35, 1 + (deltaX * horizontalDirection + deltaY * verticalDirection) / dimension)
                     updatedItem = resizeBoardItem(gesture.item, factor, gesture.handle)
                 }
             }
