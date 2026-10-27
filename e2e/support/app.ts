@@ -60,3 +60,34 @@ export async function addNote(page: Page, text: string, at: [number, number]) {
     await page.getByRole('textbox', { name: 'Note text' }).fill(text)
     await page.getByRole('button', { name: 'Add note' }).click()
 }
+
+import type { Browser, BrowserContext } from '@playwright/test'
+
+export async function newTeacher(browser: Browser) {
+    const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+    return { context, page: await context.newPage() }
+}
+
+// Creates a saved lesson with a note, then starts a share and returns the student link.
+export async function shareLesson(page: Page, options: { name?: string; requireApproval?: boolean } = {}) {
+    const { name = 'Sam', requireApproval = false } = options
+    await waitForSaved(page)
+    await page.getByRole('button', { name: 'Share lesson' }).click()
+    await expect(page.getByText(/Lesson room is live/)).toBeVisible()
+    const approval = page.getByRole('checkbox', { name: /Ask me before/ })
+    if (requireApproval) await approval.check()
+    else await approval.uncheck()
+    await page.getByRole('textbox', { name: 'Student name' }).fill(name)
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    const row = page.locator('.invite-row', { hasText: name })
+    await expect(row).toBeVisible()
+    await row.getByRole('button', { name: 'Copy link' }).click()
+    return page.evaluate(() => navigator.clipboard.readText())
+}
+
+export async function openStudent(browser: Browser, link: string) {
+    const context: BrowserContext = await browser.newContext()
+    const page = await context.newPage()
+    await page.goto(link)
+    return { context, page }
+}
