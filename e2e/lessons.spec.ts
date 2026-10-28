@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { addNote, createLesson, drawStroke, signIn, signUp, waitForSaved } from './support/app'
+import { addNote, boardPoint, createLesson, drawStroke, signIn, signUp, waitForSaved } from './support/app'
 
 test.describe('lessons and board', () => {
     test('new workspace is seeded with a demo lesson and folder', async ({ page }) => {
@@ -15,6 +15,25 @@ test.describe('lessons and board', () => {
         await waitForSaved(page)
         await page.reload()
         await expect(page.getByText('My first lesson').first()).toBeVisible()
+    })
+
+    test('warns before reload while a workspace save is pending', async ({ page }) => {
+        await signUp(page)
+        await createLesson(page, 'Pending-save warning')
+        await addNote(page, 'Keep this change', [0.5, 0.3])
+
+        const reloadWasPrevented = await page.evaluate(() => {
+            const event = new Event('beforeunload', { cancelable: true })
+            window.dispatchEvent(event)
+            return event.defaultPrevented
+        })
+        expect(reloadWasPrevented).toBe(true)
+        await expect(page.getByText('Keep this change')).toBeVisible()
+
+        await waitForSaved(page)
+        await page.reload()
+        await page.getByText('Pending-save warning').first().click()
+        await expect(page.getByText('Keep this change')).toBeVisible()
     })
 
     test('draws strokes and adds a note, then restores them after sign-out and sign-in', async ({ page }) => {
@@ -53,6 +72,55 @@ test.describe('lessons and board', () => {
         await page.mouse.click(box.x + 200, box.y + 150)
         await page.getByRole('button', { name: 'Cancel' }).click()
         await expect(page.locator('.board-item')).toHaveCount(0)
+    })
+
+    test('adds text, shapes, grids, and a web page to a lesson board', async ({ page }) => {
+        await signUp(page)
+        await createLesson(page, 'Board item types')
+
+        await page.getByRole('button', { name: 'Text', exact: true }).click()
+        const textPoint = await boardPoint(page, 0.2, 0.2)
+        await page.mouse.click(textPoint.x, textPoint.y)
+        await page.getByPlaceholder('Type here…').fill('Board text')
+        await page.keyboard.press('Control+Enter')
+        await expect(page.getByText('Board text')).toBeVisible()
+
+        await page.getByRole('button', { name: 'Shapes' }).click()
+        await page.getByRole('button', { name: 'Square shape' }).click()
+        const shapePoint = await boardPoint(page, 0.5, 0.3)
+        await page.mouse.click(shapePoint.x, shapePoint.y)
+        await expect(page.locator('.board-item')).toHaveCount(2)
+
+        await page.getByRole('button', { name: 'Word grid' }).click()
+        const gridPoint = await boardPoint(page, 0.3, 0.6)
+        await page.mouse.click(gridPoint.x, gridPoint.y)
+        await expect(page.locator('.board-item')).toHaveCount(3)
+
+        await page.getByRole('button', { name: 'Add a web page or game' }).click()
+        await page.getByRole('textbox', { name: 'Web address' }).fill('https://example.com')
+        await page.getByRole('button', { name: 'Check page' }).click()
+        await expect(page.locator('.web-check')).toBeVisible()
+        await page.getByRole('button', { name: /Add (it anyway|to page)/ }).click()
+        await expect(page.locator('.board-item')).toHaveCount(4)
+        await expect(page.getByText('example.com')).toBeVisible()
+    })
+
+    test('adds a PDF and an image through file upload', async ({ page }) => {
+        await signUp(page)
+        await createLesson(page, 'Uploaded media')
+        const upload = page.locator('input[type="file"][accept="image/*,application/pdf"]')
+        await upload.setInputFiles({
+            name: 'worksheet.pdf',
+            mimeType: 'application/pdf',
+            buffer: Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF'),
+        })
+        await expect(page.locator('.board-item')).toHaveCount(1)
+
+        const onePixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=', 'base64')
+        await upload.setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: onePixelPng })
+        await expect(page.getByRole('dialog', { name: 'Crop image' })).toBeVisible()
+        await page.getByRole('button', { name: 'Add without cropping' }).click()
+        await expect(page.locator('.board-item')).toHaveCount(2)
     })
 
     test("one teacher cannot see another teacher's lessons", async ({ browser }) => {

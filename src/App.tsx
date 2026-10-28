@@ -248,6 +248,8 @@ function App() {
     const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
     const workspaceSaveVersion = useRef(0)
+    const workspaceSaveTimeout = useRef<number | null>(null)
+    const workspaceSaveDirty = useRef(false)
 
     useLayoutEffect(() => {
         const button = document.querySelector<HTMLElement>(`.tool-rail [data-tool-id="${activeTool}"]`)
@@ -723,21 +725,39 @@ function App() {
         if (!supabase || !authSession || !workspaceReady || workspaceError || studentView) return
         const ownerId = authSession.user.id
         const version = ++workspaceSaveVersion.current
+        workspaceSaveDirty.current = true
         const timeout = window.setTimeout(() => {
+            workspaceSaveTimeout.current = null
             setCloudSaveStatus('saving')
             setCloudSaveError('')
             // Serialize writes so an older save cannot finish after and overwrite a newer workspace snapshot.
             workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage, backgroundsByPage))
             void workspaceSaveQueue.current.then(() => {
-                if (workspaceSaveVersion.current === version) setCloudSaveStatus('saved')
+                if (workspaceSaveVersion.current === version) {
+                    workspaceSaveDirty.current = false
+                    setCloudSaveStatus('saved')
+                }
             }).catch((error: unknown) => {
                 if (workspaceSaveVersion.current !== version) return
                 setCloudSaveStatus('error')
                 setCloudSaveError(error instanceof Error ? error.message : 'Unable to save your workspace.')
             })
         }, 450)
-        return () => window.clearTimeout(timeout)
+        workspaceSaveTimeout.current = timeout
+        return () => {
+            window.clearTimeout(timeout)
+            if (workspaceSaveTimeout.current === timeout) workspaceSaveTimeout.current = null
+        }
     }, [authSession?.user.id, workspaceReady, workspaceError, studentView, folders, lessons, itemsByPage, backgroundsByPage])
+    useEffect(() => {
+        function warnBeforeLeaving(event: BeforeUnloadEvent) {
+            if (!workspaceSaveDirty.current) return
+            event.preventDefault()
+            event.returnValue = ''
+        }
+        window.addEventListener('beforeunload', warnBeforeLeaving)
+        return () => window.removeEventListener('beforeunload', warnBeforeLeaving)
+    }, [])
     useEffect(() => {
         const client = supabase
         if (!client || !authSession || studentView) return
@@ -1151,7 +1171,36 @@ function App() {
         window.setTimeout(() => setCopiedInviteId((current) => current === invite.id ? '' : current), 1800)
     }
 
-    function openShareDialog() {
+    async function flushWorkspaceSave() {
+        if (!supabase || !authSession || !workspaceReady || workspaceError || studentView) return
+        if (workspaceSaveTimeout.current !== null) {
+            window.clearTimeout(workspaceSaveTimeout.current)
+            workspaceSaveTimeout.current = null
+        }
+        const version = ++workspaceSaveVersion.current
+        workspaceSaveDirty.current = true
+        setCloudSaveStatus('saving')
+        setCloudSaveError('')
+        const save = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(
+            authSession.user.id, folders, lessons, itemsByPage, backgroundsByPage,
+        ))
+        workspaceSaveQueue.current = save
+        try {
+            await save
+            if (workspaceSaveVersion.current === version) {
+                workspaceSaveDirty.current = false
+                setCloudSaveStatus('saved')
+            }
+        } catch (error) {
+            if (workspaceSaveVersion.current === version) {
+                setCloudSaveStatus('error')
+                setCloudSaveError(error instanceof Error ? error.message : 'Unable to save your workspace.')
+            }
+            throw error
+        }
+    }
+
+    async function openShareDialog() {
         if (!openLesson) return
         setShowShare(true)
         setShareLinkError('')
@@ -1159,15 +1208,19 @@ function App() {
             setShareLinkUrl(`${window.location.origin}${window.location.pathname}?view=student&lesson=${openLesson.id}`)
             return
         }
-        if (shareSessionId) return
         setShareLinkLoading(true)
-        void startLessonShare(openLesson.id).then(async (share) => {
+        try {
+            await flushWorkspaceSave()
+            if (shareSessionId) return
+            const share = await startLessonShare(openLesson.id)
             setShareSessionId(share.sessionId)
             setShareExpiresAt(share.expiresAt)
             setInvites(await listLessonInvites(share.sessionId))
-        }).catch((error: unknown) => {
+        } catch (error) {
             setShareLinkError(error instanceof Error ? error.message : 'Unable to start sharing this lesson.')
-        }).finally(() => setShareLinkLoading(false))
+        } finally {
+            setShareLinkLoading(false)
+        }
     }
 
     useEffect(() => {
