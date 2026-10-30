@@ -24,7 +24,7 @@ import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSeg
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { parseWebUrl, webHostname } from './lib/webEmbed'
 import { addLibraryBackground, backgroundImageMaxDimension, coverImageMaxDimension, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
-import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
+import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadLessonPages, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
@@ -86,6 +86,9 @@ function App() {
     const [workspaceReady, setWorkspaceReady] = useState(() => !isSupabaseConfigured || studentView)
     const [workspaceError, setWorkspaceError] = useState('')
     const [workspaceRetry, setWorkspaceRetry] = useState(0)
+    const [loadedLessonIds, setLoadedLessonIds] = useState<Set<string>>(() => new Set())
+    const [lessonLoadState, setLessonLoadState] = useState<{ lesson: Lesson; error?: string } | null>(null)
+    const lessonLoadRequestRef = useRef(0)
     const [cloudSaveStatus, setCloudSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved')
     const [cloudSaveError, setCloudSaveError] = useState('')
     const [lessons, setLessons] = useState(() => isSupabaseConfigured ? [] : readStudentLessons())
@@ -110,6 +113,8 @@ function App() {
         return active && active.lessonId === openLesson?.id ? Math.min(active.pageIndex, Math.max(0, pages.length - 1)) : 0
     })
     const [itemsByPage, setItemsByPage] = useState<PageItems>(() => isSupabaseConfigured ? {} : readStored('skyboard:items', {}))
+    const [previewItemsByLesson, setPreviewItemsByLesson] = useState<Record<string, BoardItem[]>>({})
+    const [previewBackgroundsByLesson, setPreviewBackgroundsByLesson] = useState<Record<string, string>>({})
     const [activeTool, setActiveTool] = useState<Tool>('select')
     const [selectedShape, setSelectedShape] = useState<'circle' | 'square' | 'triangle' | 'line' | 'arrow'>('circle')
     const [shapeFillEnabled, setShapeFillEnabled] = useState(false)
@@ -173,6 +178,8 @@ function App() {
     const [showNewLesson, setShowNewLesson] = useState(false)
     const [copyingLessonId, setCopyingLessonId] = useState<string | null>(null)
     const [copyDestinationFolder, setCopyDestinationFolder] = useState('')
+    const [copyLessonBusy, setCopyLessonBusy] = useState(false)
+    const [copyLessonError, setCopyLessonError] = useState('')
     const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null)
     const [postitDraft, setPostitDraft] = useState<{ id?: string; left: number; top: number; text: string } | null>(null)
     const lastItemTapRef = useRef<{ id: string; time: number } | null>(null)
@@ -295,11 +302,17 @@ function App() {
     }, [studentView])
 
     useEffect(() => {
-        if (!supabase || !authSession || studentView) return
+        if (!supabase || !authSession || studentView) {
+            lessonLoadRequestRef.current += 1
+            return
+        }
         let active = true
         const ownerId = authSession.user.id
+        lessonLoadRequestRef.current += 1
         setWorkspaceReady(false)
         setWorkspaceError('')
+        setLoadedLessonIds(new Set())
+        setLessonLoadState(null)
         void (async () => {
             let workspace = await loadWorkspace(ownerId)
             if (!workspace.initialized) {
@@ -312,6 +325,8 @@ function App() {
             setLessons(workspace.lessons)
             setItemsByPage(workspace.itemsByPage)
             setBackgroundsByPage(workspace.backgroundsByPage)
+            setPreviewItemsByLesson(workspace.previewItemsByLesson)
+            setPreviewBackgroundsByLesson(workspace.previewBackgroundsByLesson)
             setWorkspaceReady(true)
         })().catch((error: unknown) => {
             if (!active) return
@@ -744,7 +759,7 @@ function App() {
             setCloudSaveStatus('saving')
             setCloudSaveError('')
             // Serialize writes so an older save cannot finish after and overwrite a newer workspace snapshot.
-            workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage, backgroundsByPage))
+            workspaceSaveQueue.current = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(ownerId, folders, lessons, itemsByPage, backgroundsByPage, loadedLessonIds))
             void workspaceSaveQueue.current.then(() => {
                 if (workspaceSaveVersion.current === version) {
                     workspaceSaveDirty.current = false
@@ -761,7 +776,7 @@ function App() {
             window.clearTimeout(timeout)
             if (workspaceSaveTimeout.current === timeout) workspaceSaveTimeout.current = null
         }
-    }, [authSession?.user.id, workspaceReady, workspaceError, studentView, folders, lessons, itemsByPage, backgroundsByPage])
+    }, [authSession?.user.id, workspaceReady, workspaceError, studentView, folders, lessons, itemsByPage, backgroundsByPage, loadedLessonIds])
     useEffect(() => {
         function warnBeforeLeaving(event: BeforeUnloadEvent) {
             if (!workspaceSaveDirty.current) return
@@ -998,10 +1013,10 @@ function App() {
         }
         setLessons((previous) => [lesson, ...previous])
         setShowNewLesson(false)
-        openBoard(lesson)
+        openBoard(lesson, true)
     }
 
-    function openBoard(lesson: Lesson) {
+    function showLessonBoard(lesson: Lesson) {
         setOpenLesson(lesson)
         setPages(lesson.pages)
         setPageIndex(0)
@@ -1051,26 +1066,76 @@ function App() {
         })
     }
 
+    function openBoard(lesson: Lesson, pagesAlreadyLoaded = false) {
+        if (pagesAlreadyLoaded || !supabase || studentView || loadedLessonIds.has(lesson.id)) {
+            if (pagesAlreadyLoaded) setLoadedLessonIds((previous) => new Set(previous).add(lesson.id))
+            setLessonLoadState(null)
+            showLessonBoard(lesson)
+            return
+        }
+
+        const ownerId = authSession?.user.id
+        if (!ownerId) {
+            setLessonLoadState({ lesson, error: 'Your session is unavailable. Please return to the workspace and try again.' })
+            return
+        }
+
+        const requestId = ++lessonLoadRequestRef.current
+        setLessonLoadState({ lesson })
+        void loadLessonPages(ownerId, lesson.id).then((content) => {
+            if (requestId !== lessonLoadRequestRef.current) return
+            setItemsByPage((previous) => ({ ...previous, ...content.itemsByPage }))
+            setBackgroundsByPage((previous) => ({ ...previous, ...content.backgroundsByPage }))
+            setLoadedLessonIds((previous) => new Set(previous).add(lesson.id))
+            setLessonLoadState(null)
+            showLessonBoard(lesson)
+        }).catch((error: unknown) => {
+            if (requestId !== lessonLoadRequestRef.current) return
+            setLessonLoadState({ lesson, error: error instanceof Error ? error.message : 'Unable to load this lesson.' })
+        })
+    }
+
     function openDuplicateLessonDialog(lesson: Lesson) {
         setCopyingLessonId(lesson.id)
         setCopyDestinationFolder(lesson.folder)
+        setCopyLessonError('')
         setShowFileMenu(null)
     }
 
-    function duplicateLesson(lesson: Lesson, destinationFolder: string) {
-        const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, folder: destinationFolder, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
-        const copiedItems: PageItems = {}
-        const copiedBackgrounds: Record<string, string> = {}
-        lesson.pages.forEach((_, index) => {
-            const sourceKey = `${lesson.id}:${index}`
-            const targetKey = `${copy.id}:${index}`
-            if (itemsByPage[sourceKey]) copiedItems[targetKey] = structuredClone(itemsByPage[sourceKey])
-            if (backgroundsByPage[sourceKey]) copiedBackgrounds[targetKey] = backgroundsByPage[sourceKey]
-        })
-        setItemsByPage((previous) => ({ ...previous, ...copiedItems }))
-        setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
-        setLessons((previous) => [copy, ...previous])
-        setCopyingLessonId(null)
+    async function duplicateLesson(lesson: Lesson, destinationFolder: string) {
+        setCopyLessonBusy(true)
+        setCopyLessonError('')
+        try {
+            let sourceItems = itemsByPage
+            let sourceBackgrounds = backgroundsByPage
+            if (supabase && !loadedLessonIds.has(lesson.id)) {
+                if (!authSession) throw new Error('Your session is unavailable. Please return to the workspace and try again.')
+                const content = await loadLessonPages(authSession.user.id, lesson.id)
+                sourceItems = { ...sourceItems, ...content.itemsByPage }
+                sourceBackgrounds = { ...sourceBackgrounds, ...content.backgroundsByPage }
+                setItemsByPage((previous) => ({ ...previous, ...content.itemsByPage }))
+                setBackgroundsByPage((previous) => ({ ...previous, ...content.backgroundsByPage }))
+                setLoadedLessonIds((previous) => new Set(previous).add(lesson.id))
+            }
+            const copy: Lesson = { ...lesson, id: id(), title: `${lesson.title} copy`, folder: destinationFolder, pages: [...lesson.pages], updated: 'Just now', updatedAt: Date.now() }
+            const copiedItems: PageItems = {}
+            const copiedBackgrounds: Record<string, string> = {}
+            lesson.pages.forEach((_, index) => {
+                const sourceKey = `${lesson.id}:${index}`
+                const targetKey = `${copy.id}:${index}`
+                if (sourceItems[sourceKey]) copiedItems[targetKey] = structuredClone(sourceItems[sourceKey])
+                if (sourceBackgrounds[sourceKey]) copiedBackgrounds[targetKey] = sourceBackgrounds[sourceKey]
+            })
+            setItemsByPage((previous) => ({ ...previous, ...copiedItems }))
+            setBackgroundsByPage((previous) => ({ ...previous, ...copiedBackgrounds }))
+            setLoadedLessonIds((previous) => new Set(previous).add(copy.id))
+            setLessons((previous) => [copy, ...previous])
+            setCopyingLessonId(null)
+        } catch (error) {
+            setCopyLessonError(error instanceof Error ? error.message : 'Unable to copy this lesson.')
+        } finally {
+            setCopyLessonBusy(false)
+        }
     }
 
     function deleteLesson(lessonId: string) {
@@ -1195,7 +1260,7 @@ function App() {
         setCloudSaveStatus('saving')
         setCloudSaveError('')
         const save = workspaceSaveQueue.current.catch(() => undefined).then(() => saveWorkspace(
-            authSession.user.id, folders, lessons, itemsByPage, backgroundsByPage,
+            authSession.user.id, folders, lessons, itemsByPage, backgroundsByPage, loadedLessonIds,
         ))
         workspaceSaveQueue.current = save
         try {
@@ -2301,7 +2366,7 @@ function App() {
                 </foreignObject>
             )
         }
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} loading={preview ? 'lazy' : 'eager'} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
         if (item.type === 'web') {
             const frame = { x: item.left * 10, y: item.top * 6.2, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
             return <foreignObject {...frame}><div className="board-web board-web-placeholder"><Gamepad2 size={32} /><strong>{item.title || webHostname(item.url)}</strong>{studentView && <span>Your teacher will show this page during the lesson.</span>}</div></foreignObject>
@@ -2324,6 +2389,7 @@ function App() {
         if (sharedLessonStatus === 'error') return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">{sharedLessonError}</p></section></main>
         if (!openLesson) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">STUDENT VIEW</p><h1>This link isn’t working</h1><p className="auth-intro">We couldn’t find a lesson for this link.</p></section></main>
     }
+    if (lessonLoadState) return <main className="auth-screen"><section className="auth-panel"><div className="auth-brand"><span className="brand-mark"><AudioLines size={19} /></span><span>skyboard</span></div><p className="eyebrow">THERAPIST WORKSPACE</p><h1>{lessonLoadState.error ? 'Couldn’t load this lesson' : 'Loading lesson'}</h1><p className="auth-intro">{lessonLoadState.error ?? `Fetching pages for “${lessonLoadState.lesson.title}”.`}</p>{lessonLoadState.error && <><button className="auth-submit" onClick={() => openBoard(lessonLoadState.lesson)}>Try again</button><button className="auth-mode-toggle" onClick={() => setLessonLoadState(null)}>Back to workspace</button></>}</section></main>
 
     return (
         <div className="app-shell">
@@ -2414,7 +2480,7 @@ function App() {
                                     const studentFolder = lesson.folder.split(folderSeparator, 1)[0]
                                     const studentFolderIndex = orderedFolders.indexOf(studentFolder)
                                     return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                        {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item, true)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
+                                        {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: loadedLessonIds.has(lesson.id) ? backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' : backgroundsByPage[`${lesson.id}:0`] ?? previewBackgroundsByLesson[lesson.id] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(loadedLessonIds.has(lesson.id) ? itemsByPage[`${lesson.id}:0`] ?? [] : previewItemsByLesson[lesson.id] ?? itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item, true)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" loading="lazy" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
                                         <div className="lesson-info">
                                             <div className="lesson-name-line">
                                                 {renamingLessonId === lesson.id ? (
@@ -2753,17 +2819,17 @@ function App() {
                 </div>
             )}
             {copyingLesson && (
-                <div className="modal-scrim" onClick={() => setCopyingLessonId(null)}>
+                <div className="modal-scrim" onClick={() => { if (!copyLessonBusy) setCopyingLessonId(null) }}>
                     <form
                         className="share-modal new-lesson-modal"
                         role="dialog"
                         aria-modal="true"
                         aria-labelledby="copy-lesson-title"
                         onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => { if (event.key === 'Escape') setCopyingLessonId(null) }}
+                        onKeyDown={(event) => { if (event.key === 'Escape' && !copyLessonBusy) setCopyingLessonId(null) }}
                         onSubmit={(event) => { event.preventDefault(); duplicateLesson(copyingLesson, copyDestinationFolder) }}
                     >
-                        <button type="button" className="modal-close" onClick={() => setCopyingLessonId(null)} aria-label="Close"><X size={18} /></button>
+                        <button type="button" className="modal-close" onClick={() => setCopyingLessonId(null)} aria-label="Close" disabled={copyLessonBusy}><X size={18} /></button>
                         <div className="share-modal-icon"><Copy size={20} /></div>
                         <h2 id="copy-lesson-title">Make a copy</h2>
                         <p>Choose where to create a copy of “{copyingLesson.title}”.</p>
@@ -2773,9 +2839,10 @@ function App() {
                                 {copyDestinationFolders.map((folder) => <option key={folder} value={folder}>{getFolderParent(folder) ? `${'  '.repeat(folder.split(' / ').length - 1)}${getFolderName(folder)}` : folder}</option>)}
                             </select>
                         </label>
+                        {copyLessonError && <p className="form-error" role="alert">{copyLessonError}</p>}
                         <div className="new-lesson-actions">
-                            <button type="button" className="cancel-button" onClick={() => setCopyingLessonId(null)}>Cancel</button>
-                            <button type="submit" className="confirm-button" disabled={!copyDestinationFolder}><Copy size={15} /> Make a copy</button>
+                            <button type="button" className="cancel-button" onClick={() => setCopyingLessonId(null)} disabled={copyLessonBusy}>Cancel</button>
+                            <button type="submit" className="confirm-button" disabled={!copyDestinationFolder || copyLessonBusy}><Copy size={15} /> {copyLessonBusy ? 'Copying…' : 'Make a copy'}</button>
                         </div>
                     </form>
                 </div>

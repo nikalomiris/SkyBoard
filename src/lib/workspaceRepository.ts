@@ -7,7 +7,9 @@ const assetBucket = 'lesson-assets'
 type StudentRow = { id: string; name: string; position: number; is_mock: boolean }
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
 type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; card_deck: CardDeckConfig | null; is_mock: boolean; updated_at: string }
-type PageRow = { id: string; lesson_id: string; name: string; position: number; elements: BoardItem[]; background: string }
+type PageMetadataRow = { id: string; lesson_id: string; name: string; position: number }
+type PageRow = PageMetadataRow & { elements: BoardItem[]; background: string }
+type LessonPreviewRow = { lesson_id: string; background: string; elements: BoardItem[] }
 type AssetRow = { storage_path: string; lesson_id: string; page_id: string | null }
 const defaultBackground = '#fffef9'
 const pageNameSeparator = '\u0000'
@@ -89,20 +91,44 @@ async function resolveAssetUrls(items: BoardItem[], cache: Map<string, string>) 
     }))
 }
 
+async function resolvePreviewAssetUrls(previews: LessonPreviewRow[]) {
+    const client = getClient()
+    const paths = [...new Set(previews.flatMap((preview) => preview.elements.flatMap((item) => (
+        item.type === 'image' && item.storagePath ? [item.storagePath] : []
+    ))))]
+    if (!paths.length) return previews
+
+    const result = await client.storage.from(assetBucket).createSignedUrls(paths, 60 * 60 * 24)
+    if (result.error) throw new Error(result.error.message)
+    const signedUrls = new Map(result.data.map((asset) => [asset.path, asset.signedUrl ?? '']))
+    for (const asset of result.data) {
+        if (asset.error) console.warn(`Could not create a preview URL for ${asset.path}: ${asset.error}`)
+    }
+    return previews.map((preview) => ({
+        ...preview,
+        elements: preview.elements.map((item) => item.type === 'image' && item.storagePath
+            ? { ...item, src: signedUrls.get(item.storagePath) ?? '' }
+            : item),
+    }))
+}
+
 export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
     const client = getClient()
-    const [profileResult, studentsResult, foldersResult, lessonsResult, pagesResult] = await Promise.all([
+    const [profileResult, studentsResult, foldersResult, lessonsResult, pagesResult, previewsResult] = await Promise.all([
         client.from('profiles').select('workspace_initialized').eq('id', ownerId).maybeSingle(),
         client.from('students').select('id,name,position,is_mock').eq('owner_id', ownerId).order('position'),
         client.from('student_folders').select('id,student_id,parent_id,name,position').eq('owner_id', ownerId).order('position'),
         client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,card_deck,is_mock,updated_at').eq('owner_id', ownerId).order('position'),
-        client.from('lesson_pages').select('id,lesson_id,name,position,elements,background').eq('owner_id', ownerId).order('position'),
+        client.from('lesson_pages').select('id,lesson_id,name,position').eq('owner_id', ownerId).order('position'),
+        client.rpc('get_lesson_previews'),
     ])
     if (profileResult.error) throw new Error(profileResult.error.message)
     const students = (await throwOnError(studentsResult)) as StudentRow[]
     const folderRows = (await throwOnError(foldersResult)) as FolderRow[]
     const lessonRows = (await throwOnError(lessonsResult)) as LessonRow[]
-    const pageRows = (await throwOnError(pagesResult)) as PageRow[]
+    const pageRows = (await throwOnError(pagesResult)) as PageMetadataRow[]
+    const previewRows = await throwOnError(previewsResult) as LessonPreviewRow[]
+    const resolvedPreviews = await resolvePreviewAssetUrls(previewRows)
 
     const studentById = new Map(students.map((student) => [student.id, student]))
     const folderById = new Map(folderRows.map((folder) => [folder.id, folder]))
@@ -142,9 +168,8 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         addChildren(student, null, student.name)
     }
 
-    const pagesByLesson = new Map<string, PageRow[]>()
+    const pagesByLesson = new Map<string, PageMetadataRow[]>()
     for (const page of pageRows) pagesByLesson.set(page.lesson_id, [...(pagesByLesson.get(page.lesson_id) ?? []), page])
-    const assetUrlCache = new Map<string, string>()
     const itemsByPage: WorkspaceData['itemsByPage'] = {}
     const backgroundsByPage: WorkspaceData['backgroundsByPage'] = {}
     const lessons: Lesson[] = lessonRows.map((row) => {
@@ -167,25 +192,12 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             kind: 'lesson',
         }
     })
-    for (const row of lessonRows) {
-        for (const page of pagesByLesson.get(row.id) ?? []) {
-            const elements = await resolveAssetUrls(page.elements ?? [], assetUrlCache)
-            if (elements.length) itemsByPage[`${row.id}:${page.position}`] = elements
-            if (page.background) backgroundsByPage[`${row.id}:${page.position}`] = page.background
-        }
-    }
-
     for (const folder of folderRows) pathForFolder(folder.id)
     const pages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
     const pageStructures = new Map<string, string>()
     for (const lesson of lessons) {
         const hasStoredPages = (pagesByLesson.get(lesson.id) ?? []).length > 0
         pageStructures.set(lesson.id, hasStoredPages ? lesson.pages.join(pageNameSeparator) : '')
-        if (!hasStoredPages) continue
-        for (let position = 0; position < lesson.pages.length; position += 1) {
-            const key = `${lesson.id}:${position}`
-            pages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
-        }
     }
     baseline = {
         ownerId,
@@ -203,9 +215,39 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         lessons,
         itemsByPage,
         backgroundsByPage,
+        previewItemsByLesson: Object.fromEntries(resolvedPreviews.map((preview) => [preview.lesson_id, preview.elements])),
+        previewBackgroundsByLesson: Object.fromEntries(resolvedPreviews.map((preview) => [preview.lesson_id, preview.background])),
         initialized: profileResult.data?.workspace_initialized ?? false,
         hasData: students.length > 0 || lessonRows.length > 0,
     }
+}
+
+export async function loadLessonPages(ownerId: string, lessonId: string): Promise<Pick<WorkspaceData, 'itemsByPage' | 'backgroundsByPage'>> {
+    const client = getClient()
+    const result = await client.from('lesson_pages')
+        .select('id,lesson_id,name,position,elements,background')
+        .eq('owner_id', ownerId)
+        .eq('lesson_id', lessonId)
+        .order('position')
+    const rows = (await throwOnError(result)) as PageRow[]
+    const assetUrlCache = new Map<string, string>()
+    const itemsByPage: WorkspaceData['itemsByPage'] = {}
+    const backgroundsByPage: WorkspaceData['backgroundsByPage'] = {}
+    const loadedPages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
+    for (const page of rows) {
+        const key = `${lessonId}:${page.position}`
+        const elements = await resolveAssetUrls(page.elements ?? [], assetUrlCache)
+        if (elements.length) itemsByPage[key] = elements
+        if (page.background) backgroundsByPage[key] = page.background
+        loadedPages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
+    }
+
+    if (baseline?.ownerId === ownerId) {
+        const pages = new Map(baseline.pages)
+        for (const [key, page] of loadedPages) pages.set(key, page)
+        baseline = { ...baseline, pages }
+    }
+    return { itemsByPage, backgroundsByPage }
 }
 
 function dataUrlToBlob(dataUrl: string) {
@@ -353,7 +395,7 @@ async function syncStudentsAndFolders(ownerId: string, folders: string[], lesson
     }
 }
 
-export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage'], backgroundsByPage: WorkspaceData['backgroundsByPage']) {
+export async function saveWorkspace(ownerId: string, folders: string[], lessons: Lesson[], itemsByPage: WorkspaceData['itemsByPage'], backgroundsByPage: WorkspaceData['backgroundsByPage'], loadedLessonIds: ReadonlySet<string>) {
     const client = getClient()
     const known = baseline?.ownerId === ownerId ? baseline : null
     const foldersKey = foldersKeyOf(folders, lessons)
@@ -396,12 +438,14 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
     const completeLessonIds = new Set<string>()
     const pagesToSave: { lessonId: string; position: number; name: string }[] = []
     for (const lesson of lessons) {
-        const complete = !known || known.pageStructures.get(lesson.id) !== lesson.pages.join(pageNameSeparator)
+        const pageStructure = lesson.pages.join(pageNameSeparator)
+        const lessonIsNew = !known || !known.pageStructures.has(lesson.id)
+        const complete = lessonIsNew || (loadedLessonIds.has(lesson.id) && known?.pageStructures.get(lesson.id) !== pageStructure)
         if (complete) completeLessonIds.add(lesson.id)
         for (const [position, name] of lesson.pages.entries()) {
             const key = `${lesson.id}:${position}`
             const previous = known?.pages.get(key)
-            if (complete || !previous || previous.items !== itemsByPage[key] || previous.background !== (backgroundsByPage[key] ?? defaultBackground)) pagesToSave.push({ lessonId: lesson.id, position, name })
+            if (complete || (loadedLessonIds.has(lesson.id) && (!previous || previous.items !== itemsByPage[key] || previous.background !== (backgroundsByPage[key] ?? defaultBackground)))) pagesToSave.push({ lessonId: lesson.id, position, name })
         }
     }
     const currentLessonIds = new Set(lessons.map((lesson) => lesson.id))
@@ -445,11 +489,20 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
 
     await removeStaleHierarchy?.()
 
-    const pages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
+    const pages = new Map(known?.pages ?? [])
     for (const lesson of lessons) {
+        if (!loadedLessonIds.has(lesson.id)) continue
+        for (const key of pages.keys()) {
+            if (key.startsWith(`${lesson.id}:`)) pages.delete(key)
+        }
         for (let position = 0; position < lesson.pages.length; position += 1) {
             const key = `${lesson.id}:${position}`
             pages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
+        }
+    }
+    for (const lessonId of deletedLessonIds) {
+        for (const key of pages.keys()) {
+            if (key.startsWith(`${lessonId}:`)) pages.delete(key)
         }
     }
     baseline = {
