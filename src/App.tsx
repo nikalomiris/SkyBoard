@@ -270,6 +270,14 @@ function App() {
     const workspaceSaveTimeout = useRef<number | null>(null)
     const workspaceSaveDirty = useRef(false)
 
+    useEffect(() => {
+        if (!showBackgrounds) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.background-panel, [aria-label="Set background"], .modal-scrim')) setShowBackgrounds(false)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [showBackgrounds])
     useLayoutEffect(() => {
         const button = document.querySelector<HTMLElement>(`.tool-rail [data-tool-id="${activeTool}"]`)
         const workspace = workspaceRef.current
@@ -1683,9 +1691,11 @@ function App() {
         if (activeTool !== 'select' || studentView) return
         setSelectedItemId(item.id)
         event.stopPropagation()
+        if (editingTextId && editingTextId !== item.id) endTextEditing()
         if (event.target instanceof HTMLInputElement || (event.target instanceof Element && event.target.closest('[data-web-control]'))) {
             return
         }
+        event.preventDefault()
         const { stageX, stageY } = coordinates(event)
         itemGestureRef.current = { mode: 'move', item, startX: stageX, startY: stageY, bounds: getItemBounds(item) }
         stageRef.current?.setPointerCapture(event.pointerId)
@@ -1854,15 +1864,17 @@ function App() {
         }))
     }
 
+    function endTextEditing() {
+        // The input may have lost focus to the toolbar, so its blur never ended the edit.
+        const editedId = editingTextId
+        setEditingTextId(null)
+        if (editedId && currentItems.some((item) => item.id === editedId && item.type === 'text' && !item.text.trim())) updateCurrentItems((items) => items.filter((item) => item.id !== editedId))
+    }
+
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
-        if (editingTextId) {
-            // The input may have lost focus to the toolbar, so its blur never ended the edit.
-            const editedId = editingTextId
-            setEditingTextId(null)
-            if (currentItems.some((item) => item.id === editedId && item.type === 'text' && !item.text.trim())) updateCurrentItems((items) => items.filter((item) => item.id !== editedId))
-        }
+        if (editingTextId) endTextEditing()
         if (activeTool === 'text' || activeTool === 'postit') return
         if (activeTool === 'element-eraser') {
             const hit = currentItems.find((item) => {

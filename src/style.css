@@ -1923,6 +1923,17 @@ kbd {
     cursor: crosshair;
 }
 
+.page-paper[data-tool="select"] .drawing-layer .board-item {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.page-paper[data-tool="select"] .drawing-layer .board-item textarea,
+.page-paper[data-tool="select"] .drawing-layer .board-item input {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
 .drawing-layer {
     position: absolute;
     inset: 0;
