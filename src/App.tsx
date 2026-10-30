@@ -239,11 +239,24 @@ function App() {
     }, [imageNotice])
     const backgroundOwnerId = authSession?.user.id ?? null
     useEffect(() => {
-        if (studentView || (isSupabaseConfigured && !backgroundOwnerId)) { setBackgroundLibrary([]); return }
+        if (studentView || (isSupabaseConfigured && !backgroundOwnerId)) {
+            setBackgroundLibrary([])
+            setBackgroundLibraryError('')
+            return
+        }
+        if (!showBackgrounds) return
         let active = true
-        loadBackgroundLibrary(backgroundOwnerId).then((entries) => { if (active) { setBackgroundLibrary(entries); setBackgroundLibraryError('') } }).catch(() => { if (active) setBackgroundLibrary([]) })
+        setBackgroundLibrary([])
+        setBackgroundLibraryError('')
+        loadBackgroundLibrary(backgroundOwnerId).then((entries) => {
+            if (active) setBackgroundLibrary(entries)
+        }).catch((error: unknown) => {
+            if (!active) return
+            setBackgroundLibrary([])
+            setBackgroundLibraryError(error instanceof Error ? error.message : 'Could not load your background library.')
+        })
         return () => { active = false }
-    }, [backgroundOwnerId, studentView])
+    }, [backgroundOwnerId, showBackgrounds, studentView])
     const backgroundInputRef = useRef<HTMLInputElement>(null)
     const coverInputRef = useRef<HTMLInputElement>(null)
     const workspaceSaveQueue = useRef<Promise<void>>(Promise.resolve())
@@ -2246,7 +2259,7 @@ function App() {
         </foreignObject>
     }
 
-    function renderBoardItem(item: BoardItem): ReactNode {
+    function renderBoardItem(item: BoardItem, preview = false): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <path d={smoothPath(item.points)} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
         if (item.type === 'text') {
@@ -2288,11 +2301,12 @@ function App() {
                 </foreignObject>
             )
         }
-        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
+        if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} loading={preview ? 'lazy' : 'eager'} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
         if (item.type === 'web') {
             const frame = { x: item.left * 10, y: item.top * 6.2, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
             return <foreignObject {...frame}><div className="board-web board-web-placeholder"><Gamepad2 size={32} /><strong>{item.title || webHostname(item.url)}</strong>{studentView && <span>Your teacher will show this page during the lesson.</span>}</div></foreignObject>
         }
+        if (preview) return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
 
@@ -2400,7 +2414,7 @@ function App() {
                                     const studentFolder = lesson.folder.split(folderSeparator, 1)[0]
                                     const studentFolderIndex = orderedFolders.indexOf(studentFolder)
                                     return <article className={`lesson-card ${showFileMenu === lesson.id ? 'menu-open' : ''}`} key={lesson.id} draggable onDragStart={(event) => { setDraggingId(lesson.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', lesson.id) }} onDragEnd={() => setDraggingId(null)} onClick={() => openBoard(lesson)}>
-                                        {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
+                                        {cover === 'page' ? <div className="lesson-thumb page-preview" aria-hidden="true" style={{ background: backgroundsByPage[`${lesson.id}:0`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="xMidYMin slice">{(itemsByPage[`${lesson.id}:0`] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item, true)}</g>)}</svg></div> : cover === 'custom' && lesson.coverImage ? <div className="lesson-thumb custom-cover" aria-hidden="true"><img src={lesson.coverImage} alt="" /></div> : <LessonThumbnail kind={cover} tint={lesson.color} />}
                                         <div className="lesson-info">
                                             <div className="lesson-name-line">
                                                 {renamingLessonId === lesson.id ? (
@@ -2503,7 +2517,7 @@ function App() {
                                                 aria-pressed={pageSelectionMode ? selected : undefined}
                                                 onDoubleClick={() => { if (!pageSelectionMode) startRenamePage(index) }}
                                                 onClick={() => { if (pageSelectionMode) togglePageSelection(index); else { setPageIndex(index); setSelectedItemId(null) } }}>
-                                                <span className="page-directory-thumb" aria-hidden="true" style={{ background: backgroundsByPage[key] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[key] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></span>
+                                                <span className="page-directory-thumb" aria-hidden="true" style={{ background: backgroundsByPage[key] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[key] ?? []).map((item) => <g key={item.id}>{renderBoardItem(item, true)}</g>)}</svg></span>
                                                 {renamingPageIndex !== index && <span className="page-directory-label">{pageSelectionMode && <span className="page-selection-indicator" aria-hidden="true">{selected && <Check size={12} />}</span>}<span className="page-number">{String(index + 1).padStart(2, '0')}</span><span className="page-directory-name">{page}</span></span>}
                                             </button>
                                             {renamingPageIndex === index && <div className="page-directory-label page-directory-rename"><span className="page-number">{String(index + 1).padStart(2, '0')}</span><input className="page-rename-input" autoFocus value={pageRenameValue} onFocus={(event) => event.target.select()} onChange={(event) => setPageRenameValue(event.target.value)} onBlur={commitPageRename} onKeyDown={(event) => { if (event.key === 'Enter') commitPageRename(); if (event.key === 'Escape') setRenamingPageIndex(null) }} /></div>}
@@ -2623,7 +2637,7 @@ function App() {
                                 {clipboardPages.map((entry) => (
                                     <li key={entry.id}>
                                         <button type="button" className="paste-entry" onClick={() => pasteClipboardPage(entry)}>
-                                            <div className="paste-thumb" aria-hidden="true" style={{ background: entry.background ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{entry.items.map((item) => <g key={item.id}>{renderBoardItem(item)}</g>)}</svg></div>
+                                            <div className="paste-thumb" aria-hidden="true" style={{ background: entry.background ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{entry.items.map((item) => <g key={item.id}>{renderBoardItem(item, true)}</g>)}</svg></div>
                                             <div className="paste-info">
                                                 <strong>{entry.name}</strong>
                                                 <span>{entry.sourceLesson} · {entry.items.length} item{entry.items.length === 1 ? '' : 's'} · {new Date(entry.copiedAt).toLocaleString()}</span>
@@ -2798,7 +2812,7 @@ function App() {
             {imageNotice && <div className={`image-notice ${imageNotice.tone}`} role={imageNotice.tone === 'error' ? 'alert' : 'status'}><span>{imageNotice.text}</span><button type="button" aria-label="Dismiss" title="Dismiss" onClick={() => setImageNotice(null)}><X size={14} /></button></div>}
             {coverEditorLesson && <div className="modal-scrim" onClick={() => setCoverEditorLessonId(null)}><div className="share-modal tag-editor-modal" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setCoverEditorLessonId(null)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><FileImage size={20} /></div><h2>Lesson cover</h2><p>{coverEditorLesson.title}</p>{coverEditorLesson.cover === 'custom' && coverEditorLesson.coverImage && <div className="cover-editor-preview"><img src={coverEditorLesson.coverImage} alt="Current cover" /></div>}<input ref={coverInputRef} type="file" accept="image/*" hidden onChange={handleCoverUpload} /><div className="new-lesson-actions"><button type="button" className="cancel-button" onClick={() => setCoverEditorLessonId(null)}>Cancel</button><button type="button" className="confirm-button" onClick={() => coverInputRef.current?.click()}><ImagePlus size={15} /> Upload cover image</button></div></div></div>}
             {showProfileSettings && authSession && !studentView && <ProfileSettings userId={authSession.user.id} email={authSession.user.email ?? ''} initialDisplayName={profileDisplayName} onClose={() => setShowProfileSettings(false)} onSaved={(displayName, avatarUrl) => { setProfileDisplayName(displayName); setProfileAvatarUrl(avatarUrl) }} />}
-            {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map(renderBoardItem)}</svg></div>)}</div>}
+            {printing && openLesson && <div className="print-pages">{pages.map((_, index) => <div className="print-page" key={index} style={{ background: backgroundsByPage[`${openLesson.id}:${index}`] ?? '#fffef9' }}><svg viewBox="0 0 1000 620" preserveAspectRatio="none">{(itemsByPage[`${openLesson.id}:${index}`] ?? []).map((item) => renderBoardItem(item))}</svg></div>)}</div>}
             {showShare && openLesson && <div className="modal-scrim" onClick={() => setShowShare(false)}><div className="share-modal invite-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Users size={20} /></div><h2>Bring your students in</h2><p>Give each student a personal link. They follow the page you’re teaching on.</p>
                 {!isSupabaseConfigured ? <div className="share-link"><span>{shareLinkUrl}</span><button onClick={() => { void navigator.clipboard?.writeText(shareLinkUrl); setShowShare(false) }}><Copy size={15} /> Copy</button></div> : shareLinkLoading ? <p className="share-link-status">Starting your lesson room…</p> : <>
                     {shareLinkError && <p className="share-link-status error">{shareLinkError}</p>}
