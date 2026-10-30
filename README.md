@@ -27,6 +27,40 @@ Open the local URL printed by Vite in your terminal (by default http://localhost
 
 Student view: add `?view=student` to the app URL.
 
+## Testing
+
+Install dependencies with `npm install`. End-to-end tests use Playwright's Chromium browser; install it once with:
+
+```sh
+npx playwright install chromium
+```
+
+Unit tests run in jsdom and leave Supabase unconfigured, so they exercise the browser-local fallback:
+
+| Command | Purpose |
+| --- | --- |
+| `npm run test:unit` | Run unit tests |
+| `npm run test:watch` | Run unit tests in watch mode |
+| `npm run test:coverage` | Run unit tests and write an HTML coverage report to `coverage/` |
+| `npm run test:e2e` | Run Playwright end-to-end tests in Chromium |
+| `npm run test:db` | Run pgTAP database tests with `supabase test db` |
+| `npm run test:all` | Type-check, then run unit and end-to-end tests (does not include database tests) |
+
+End-to-end and database tests use the **local Supabase stack**. Start Docker Desktop, then run:
+
+```sh
+npx supabase start
+```
+
+Copy the local API URL and publishable key shown by the command into `.env.test.local`:
+
+```dotenv
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_PUBLISHABLE_KEY=<local publishable key>
+```
+
+The test environment reads these values to connect to local Supabase; do not put production credentials in `.env.test.local`. The Playwright config starts Vite on port 5199 for the tests. Run `npm run test:e2e` or `npm run test:db` with the local Supabase stack running. The e2e suite creates disposable local accounts and tests authentication, lesson editing and persistence, sharing, and live collaboration. Database tests roll back their fixtures.
+
 ## Build
 
 ```sh
@@ -57,4 +91,4 @@ The frontend remains a static Vite app hosted on Vercel. Supabase is the planned
 
 The initial migration creates therapist-owned profiles, students, nested folders, lessons, ordered pages with JSON board elements, asset metadata, private storage policies, and lesson-session records. Sessions have a one-hour therapist-inactivity expiry; `end_lesson_session` supports immediate revocation.
 
-**Current status:** when Supabase environment variables are configured, therapist views use Supabase email/password sign-in, account creation, session restoration, and sign-out. Profile settings support display-name changes, private avatar uploads, and password updates. Student roots, nested folders, lessons, pages, tags, board elements, and lesson assets are loaded and saved in Supabase. Existing browser-local lessons are not imported; new cloud workspaces start with the sample lessons. Run `npx supabase db push` after pulling schema changes; starter seeding is atomic and recoverable. Student share-token creation/validation and cross-device session updates are not wired up yet, and page background persistence is still pending.
+**Current status:** when Supabase environment variables are configured, therapist views use Supabase email/password sign-in, account creation, session restoration, and sign-out. Profile settings support display-name changes, private avatar uploads, and password updates. Student roots, nested folders, lessons, pages, tags, board elements, and lesson assets are loaded and saved in Supabase. Existing browser-local lessons are not imported; new cloud workspaces start with the sample lessons. Run `npx supabase db push` after pulling schema changes; starter seeding is atomic and recoverable.

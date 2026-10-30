@@ -27,6 +27,7 @@ function strokeHit(points: string, x: number, y: number) {
 const vowels = new Set(['a', 'e', 'i', 'o', 'u'])
 export const letterTiles = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'qu', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
 export const digraphTiles = ['sh', 'th', 'ch', 'wh', 'ph', 'tch', 'dge', 'ff', 'll', 'ss', 'zz', 'ck']
+export const silentLetterTiles = ['gh', 'wr', 'gn']
 export const silentETiles = ['ge', 'a_e', 'e_e', 'i_e', 'o_e', 'u_e', 'e']
 const blendingBoardSilentETiles = ['ge', 'e']
 export const closedExceptionTiles = ['ild', 'ind', 'old', 'ost', 'olt']
@@ -57,7 +58,7 @@ export const initialFinalBlendRows = [
     ['sk', 'sn', 'sm', 'sp', 'sw', 'tw', 'str'],
     ['nd', 'nt', 'mp', 'ft', 'st', 'ct'],
 ]
-const tabs = ['Basic Tiles', 'Glued Sounds', 'Silent e', 'Closed Exceptions', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels'] as const
+const tabs = ['Basic Tiles', 'Silent Letters', 'Glued Sounds', 'Silent e', 'Closed Exceptions', 'Advanced Vowels', 'Prefixes, Roots & Suffixes', 'Capital Letters', 'Syllable Labels'] as const
 const boardColors = [
     { name: 'Sky', color: '#81a6c6' },
     { name: 'Lavender', color: '#c9bce8' },
@@ -239,7 +240,9 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
         </div>}
         {!readOnly && <div className="blending-tray">
             {tabs.map((tab) => <div key={tab} className={`blending-tray-panel ${tab === activeTab ? 'active' : ''}`} aria-hidden={tab !== activeTab}>
-            {tab === 'Silent e' ? <div className="blending-special-tiles" role="group" aria-label="Silent e tiles">
+            {tab === 'Silent Letters' ? <div className="blending-special-tiles" role="group" aria-label="Silent letters">
+                {silentLetterTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
+            </div> : tab === 'Silent e' ? <div className="blending-special-tiles" role="group" aria-label="Silent e tiles">
                 {blendingBoardSilentETiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
             </div> : tab === 'Closed Exceptions' ? <div className="blending-special-tiles" role="group" aria-label="Closed exception tiles">
                 {closedExceptionTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
@@ -270,7 +273,7 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
                         {gluedSoundTiles.map((text) => <button key={text} className="tray-tile consonant glued-sound-tile" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                     </div>}
                 </div>
-                <div className="blending-digraphs">
+                <div className="blending-digraphs" role="group" aria-label="Digraphs">
                     {digraphTiles.map((text) => <button key={text} className="tray-tile consonant" aria-label={`Drag tile ${text}`} onPointerDown={(event) => startDrag(event, text, null)}>{text}</button>)}
                 </div>
             </>}
