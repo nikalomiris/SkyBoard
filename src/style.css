@@ -3324,84 +3324,6 @@ kbd {
     cursor: not-allowed;
 }
 
-.cover-picker {
-    min-width: 0;
-    margin: 18px 0 0;
-    padding: 0;
-    border: 0;
-}
-
-.cover-picker legend {
-    padding: 0;
-    color: color-mix(in srgb, var(--accent) 83%, white);
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.cover-picker>p {
-    margin-top: 5px;
-}
-
-.cover-options {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.cover-option {
-    min-width: 0;
-    padding: 5px;
-    display: grid;
-    gap: 6px;
-    border: 1px solid color-mix(in srgb, var(--accent) 16%, white);
-    border-radius: 5px;
-    background: #fff;
-    color: color-mix(in srgb, var(--accent) 87%, white);
-    text-align: left;
-    cursor: pointer;
-}
-
-.cover-option.selected {
-    border-color: color-mix(in srgb, var(--accent) 92%, white);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 92%, white);
-}
-
-.cover-option:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 57%, white);
-    outline-offset: 2px;
-}
-
-.cover-option>span {
-    overflow-wrap: anywhere;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.cover-option .lesson-thumb {
-    width: 100%;
-    height: 72px;
-    border-radius: 3px;
-}
-
-.cover-option .thumb-chip {
-    min-width: 25px;
-    height: 30px;
-    font-size: 14px;
-}
-
-.cover-option .thumb-title {
-    top: 9px;
-    left: 9px;
-    font-size: 15px;
-}
-
-.cover-option .thumb-underline {
-    bottom: 9px;
-    left: 10px;
-    width: 62px;
-}
-
 .new-lesson-actions {
     margin-top: 20px;
     display: flex;
@@ -3655,10 +3577,6 @@ kbd {
 @media (max-width: 720px) {
     .new-lesson-modal {
         padding: 22px;
-    }
-
-    .cover-options {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .topbar {

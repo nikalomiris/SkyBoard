@@ -1,18 +1,11 @@
 import { isSupabaseConfigured } from './supabase'
-import type { Lesson, LessonCover } from './workspaceTypes'
+import type { Lesson } from './workspaceTypes'
 
 export type Tool = 'select' | 'pen' | 'brush' | 'highlighter' | 'eraser' | 'element-eraser' | 'postit' | 'text' | 'shape' | 'grid' | 'laser'
 
 export const lessonColors = ['#daf0e9', '#fae7d9', '#e3e9fc', '#f5e8a8']
 export const MIN_GRID_SIZE = 1
 export const MAX_GRID_SIZE = 6
-export const lessonCoverOptions: { id: LessonCover; label: string; tint: string }[] = [
-    { id: 'page', label: 'No thumbnail', tint: '#fffef9' },
-    { id: 'vowels', label: 'Sound tiles', tint: lessonColors[0] },
-    { id: 'blends', label: 'Word blends', tint: lessonColors[1] },
-    { id: 'safari', label: 'Syllable safari', tint: lessonColors[2] },
-    { id: 'magic', label: 'Magic e', tint: lessonColors[3] },
-]
 export const initialLessons: Lesson[] = [
     { id: '11111111-1111-4111-8111-111111111111', title: 'Short vowels at family', folder: 'Demo student', pages: ['Warm up', 'Blend it', 'Read it'], updated: 'Today', color: lessonColors[0], cover: 'vowels', isMock: true, kind: 'lesson' },
 ]

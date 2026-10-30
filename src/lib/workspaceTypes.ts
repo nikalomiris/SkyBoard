@@ -25,6 +25,8 @@ export type WorkspaceData = {
     lessons: Lesson[]
     itemsByPage: PageItems
     backgroundsByPage: Record<string, string>
+    previewItemsByLesson: Record<string, BoardItem[]>
+    previewBackgroundsByLesson: Record<string, string>
     initialized: boolean
     hasData: boolean
 }
