@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, Lock, Play, Unlock, X } from 'lucide-react'
-import { advancedVowelGroups, affixRootGroups, closedExceptionTiles, digraphTiles, gluedSoundTiles, initialFinalBlendRows, letterTiles, silentETiles } from './BlendingBoard'
+import { advancedVowelGroups, affixRootGroups, closedExceptionTiles, digraphTiles, gluedSoundTiles, initialFinalBlendRows, letterTiles, silentETiles, silentLetterTiles } from './BlendingBoard'
 import type { BoardItem, CardDeckConfig, DeckTile } from '../lib/workspaceTypes'
 
 export type DeckSession = { order: DeckTile[]; index: number; review?: boolean }
@@ -44,13 +44,15 @@ export function buildDeckPageItems(tiles: DeckTile[]): BoardItem[] {
 function deckTileClass(tile: DeckTile) {
     if (tile.kind === 'prefix' || tile.kind === 'root' || tile.kind === 'suffix') return `deck-${tile.kind}`
     if (tile.kind === 'consonant') return 'deck-consonant'
+    if (tile.kind === 'vowel') return 'deck-vowel'
     return vowels.has(tile.text.toLowerCase()) ? 'deck-vowel' : 'deck-consonant'
 }
 
 // Every distinct tile offered by the blending board, grouped the way the board groups them.
 const catalog: { label: string; tiles: DeckTile[] }[] = [
-    { label: 'Letters', tiles: letterTiles.map((text) => ({ text })) },
-    { label: 'Digraphs', tiles: digraphTiles.map((text) => ({ text })) },
+    { label: 'Basic Letters', tiles: letterTiles.flatMap((text): DeckTile[] => text === 'y' ? [{ text }, { text, kind: 'vowel' }] : [{ text }]) },
+    { label: 'Digraphs', tiles: [...digraphTiles, 'c-le'].map((text) => ({ text })) },
+    { label: 'Silent Letters', tiles: silentLetterTiles.map((text) => ({ text })) },
     { label: 'Silent e', tiles: silentETiles.filter((text) => text !== 'e').map((text) => ({ text })) },
     { label: 'Closed Exceptions', tiles: closedExceptionTiles.map((text) => ({ text })) },
     { label: 'Glued sounds', tiles: gluedSoundTiles.map((text) => ({ text })) },
