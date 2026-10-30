@@ -28,13 +28,13 @@ import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiv
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
 import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
-    folderSeparator, id, initialLessons, lessonCoverOptions, MAX_GRID_SIZE, MIN_GRID_SIZE,
+    folderSeparator, id, initialLessons, MAX_GRID_SIZE, MIN_GRID_SIZE,
     mockFolderNames, mockLessonIds, notePalette, palette, readStudentFolders, readStudentLessons, readStored,
     textFontOptions,
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
 import type { ItemBounds, Point, ResizeHandle } from './lib/boardGeometry'
-import type { BoardItem, ClipboardPage, DeckTile, GridCellStyle, Lesson, LessonCover, PageItems } from './lib/workspaceTypes'
+import type { BoardItem, ClipboardPage, DeckTile, GridCellStyle, Lesson, PageItems } from './lib/workspaceTypes'
 
 type ItemGesture =
     | { mode: 'move'; item: BoardItem; startX: number; startY: number; bounds: ItemBounds }
@@ -202,7 +202,6 @@ function App() {
     const [newLessonFolder, setNewLessonFolder] = useState('')
     const [creatingLessonFolder, setCreatingLessonFolder] = useState(false)
     const [newLessonFolderName, setNewLessonFolderName] = useState('')
-    const [newLessonCover, setNewLessonCover] = useState<LessonCover>('page')
     const [showImageSearch, setShowImageSearch] = useState(false)
     const [showWebDialog, setShowWebDialog] = useState(false)
     const [playingWebId, setPlayingWebId] = useState<string | null>(null)
@@ -1001,15 +1000,13 @@ function App() {
         setNewLessonFolder(folders.includes(activeFolder) ? activeFolder : folders[0] ?? 'My lessons')
         setCreatingLessonFolder(false)
         setNewLessonFolderName('')
-        setNewLessonCover('page')
         setShowNewLesson(true)
     }
 
     function createLesson() {
-        const cover = lessonCoverOptions.find((option) => option.id === newLessonCover) ?? lessonCoverOptions[0]
         const lesson: Lesson = {
             id: id(), title: newLessonTitle.trim() || 'Untitled lesson', folder: newLessonFolder || folders[0] || 'My lessons', pages: ['Page 1'], updated: 'Just now', updatedAt: Date.now(),
-            color: cover.tint, cover: cover.id, kind: 'lesson',
+            color: '#fffef9', cover: 'page', kind: 'lesson',
         }
         setLessons((previous) => [lesson, ...previous])
         setShowNewLesson(false)
@@ -2750,7 +2747,7 @@ function App() {
                         <button type="button" className="modal-close" onClick={() => setShowNewLesson(false)} aria-label="Close"><X size={18} /></button>
                         <div className="share-modal-icon"><NotebookTabs size={20} /></div>
                         <h2>New lesson</h2>
-                        <p>Give your lesson a name and choose how it appears in your library.</p>
+                        <p>Give your lesson a name and choose where it belongs in your library.</p>
                         <label className="new-lesson-field">
                             Lesson name
                             <input autoFocus required value={newLessonTitle} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setNewLessonTitle(event.target.value)} />
@@ -2799,18 +2796,6 @@ function App() {
                                 </div>
                             </div>
                         )}
-                        <fieldset className="cover-picker">
-                            <legend>Thumbnail</legend>
-                            <p>Choose a cover, or select No thumbnail to use the first page as the card preview.</p>
-                            <div className="cover-options">
-                                {lessonCoverOptions.map((option) => (
-                                    <button key={option.id} type="button" className={`cover-option ${newLessonCover === option.id ? 'selected' : ''}`} aria-pressed={newLessonCover === option.id} onClick={() => setNewLessonCover(option.id)}>
-                                        {option.id === 'page' ? <div className="lesson-thumb page-preview cover-option-preview" aria-hidden="true"><svg viewBox="0 0 1000 620" preserveAspectRatio="none" /></div> : <LessonThumbnail kind={option.id} tint={option.tint} />}
-                                        <span>{option.label}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </fieldset>
                         <div className="new-lesson-actions">
                             <button type="button" className="cancel-button" onClick={() => setShowNewLesson(false)}>Cancel</button>
                             <button type="submit" className="confirm-button" disabled={!newLessonTitle.trim()}><Plus size={15} /> Create lesson</button>
