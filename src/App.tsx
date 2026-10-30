@@ -1932,9 +1932,9 @@ function App() {
         const files = Array.from(input.files ?? []).filter((file) => file.type === 'application/pdf' || isImage(file))
         input.value = ''
         if (!files.length) return
-        const needsConversion = (file: File) => isImage(file) && !['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'].includes(file.type)
+        const needsConversion = (file: File) => isImage(file) && !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)
         const unusual = files.filter(needsConversion)
-        if (unusual.length) setImageNotice({ tone: 'warning', text: `${unusual.map((file) => file.name).join(', ')} ${unusual.length === 1 ? 'is' : 'are'} not a widely supported image format. We will try to convert ${unusual.length === 1 ? 'it' : 'them'} to JPEG.` })
+        if (unusual.length) setImageNotice({ tone: 'warning', text: `Some image formats need conversion before they can be stored. We will try to convert ${unusual.map((file) => file.name).join(', ')} to JPEG.` })
         else setImageNotice(null)
         const readFile = (file: File) => needsConversion(file)
             ? downscaleImage(file)

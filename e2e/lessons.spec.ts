@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { addNote, boardPoint, createLesson, drawStroke, signIn, signUp, waitForSaved } from './support/app'
+import { makeSupportedImageFiles } from './support/images'
 
 test.describe('lessons and board', () => {
     test('new workspace is seeded with a demo lesson and folder', async ({ page }) => {
@@ -105,9 +106,46 @@ test.describe('lessons and board', () => {
         await expect(page.getByText('example.com')).toBeVisible()
     })
 
-    test('adds a PDF and an image through file upload', async ({ page }) => {
+    test('adds, crops, saves, and reloads each supported image extension', async ({ page }) => {
         await signUp(page)
-        await createLesson(page, 'Uploaded media')
+        await createLesson(page, 'Image formats')
+        const upload = page.locator('input[type="file"][accept="image/*,application/pdf"]')
+        const formats = await makeSupportedImageFiles(page)
+
+        for (const format of formats) {
+            await upload.setInputFiles({
+                name: format.name,
+                mimeType: format.mimeType,
+                buffer: format.buffer,
+            })
+            const cropDialog = page.getByRole('dialog', { name: 'Crop image' })
+            await expect(cropDialog).toBeVisible()
+            await expect.poll(() => cropDialog.locator('.crop-frame img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
+            await page.getByRole('button', { name: 'Crop and add' }).click()
+
+            const image = page.locator(`.board-item img[alt="${format.name}"]`)
+            await expect(image).toBeVisible()
+            await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+            await expect(image).toHaveAttribute('src', /^data:image\/jpeg;base64,/)
+        }
+
+        await expect(page.locator('.board-item')).toHaveCount(formats.length)
+        await expect(page.getByRole('alert')).toHaveCount(0)
+        await waitForSaved(page)
+        await page.reload()
+        await page.getByText('Image formats').first().click()
+
+        for (const format of formats) {
+            const image = page.locator(`.board-item img[alt="${format.name}"]`)
+            await expect(image).toBeVisible()
+            await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
+        }
+        await expect(page.locator('.board-item')).toHaveCount(formats.length)
+    })
+
+    test('adds a PDF through file upload', async ({ page }) => {
+        await signUp(page)
+        await createLesson(page, 'PDF upload')
         const upload = page.locator('input[type="file"][accept="image/*,application/pdf"]')
         await upload.setInputFiles({
             name: 'worksheet.pdf',
@@ -115,12 +153,7 @@ test.describe('lessons and board', () => {
             buffer: Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF'),
         })
         await expect(page.locator('.board-item')).toHaveCount(1)
-
-        const onePixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=', 'base64')
-        await upload.setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: onePixelPng })
-        await expect(page.getByRole('dialog', { name: 'Crop image' })).toBeVisible()
-        await page.getByRole('button', { name: 'Add without cropping' }).click()
-        await expect(page.locator('.board-item')).toHaveCount(2)
+        await expect(page.locator('.board-item')).toContainText('worksheet.pdf')
     })
 
     test("one teacher cannot see another teacher's lessons", async ({ browser }) => {
