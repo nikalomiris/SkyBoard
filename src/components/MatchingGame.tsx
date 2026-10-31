@@ -1,14 +1,13 @@
 import { useState } from 'react'
-import { Lock, RotateCcw, Sparkles, Unlock, X } from 'lucide-react'
-import { MAX_MATCH_WORDS, MIN_MATCH_WORDS, hasPendingPair, isPendingMatch, isRoundOver, parseMatchWords } from '../lib/matchGame'
-import type { MatchPlayer, MatchSession } from '../lib/matchGame'
+import { Lock, RotateCcw, SkipForward, Sparkles, Unlock, X } from 'lucide-react'
+import { MAX_MATCH_WORDS, MIN_MATCH_WORDS, hasPendingPair, isPendingMatch, isRoundOver, matchWinners, parseMatchWords } from '../lib/matchGame'
+import type { MatchSession } from '../lib/matchGame'
 import type { MatchGameConfig } from '../lib/workspaceTypes'
 
-const playerNames = ['Teacher', 'Student']
-
-export default function MatchingGame({ readOnly = false, locked = false, config, onConfigChange, session, onStart, onEdit, onFlip, onAdvance, onClose }: {
+export default function MatchingGame({ readOnly = false, myId, offline = [], config, onConfigChange, session, onStart, onEdit, onFlip, onAdvance, onSkip, onClose }: {
     readOnly?: boolean
-    locked?: boolean
+    myId: string
+    offline?: string[]
     config?: MatchGameConfig
     onConfigChange?: (config: MatchGameConfig) => void
     session: MatchSession
@@ -16,17 +15,19 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
     onEdit?: () => void
     onFlip: (index: number) => void
     onAdvance?: () => void
+    onSkip?: () => void
     onClose: () => void
 }) {
     const [text, setText] = useState(() => (config?.words ?? []).join('\n'))
     const [error, setError] = useState('')
     const ready = Boolean(config?.ready)
     const playing = session.cards.length > 0
-    const me: MatchPlayer = readOnly ? 1 : 0
+    const me = session.players.findIndex((player) => player.id === myId)
+    const current = session.players[session.turn]
     const over = isRoundOver(session)
     const pending = hasPendingPair(session)
     const pendingMatch = isPendingMatch(session)
-    const myTurn = session.turn === me && !locked && !pending && !over
+    const myTurn = me >= 0 && session.turn === me && !pending && !over
     const columns = Math.max(1, Math.ceil(Math.sqrt(session.cards.length * 1.6)))
     const rows = Math.max(1, Math.ceil(session.cards.length / columns))
     const words = parseMatchWords(text)
@@ -38,11 +39,20 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
         onConfigChange?.({ words, ready: true })
     }
     function winnerText() {
-        if (session.scores[0] === session.scores[1]) return "It's a tie!"
-        return `${playerNames[session.scores[0] > session.scores[1] ? 0 : 1]} wins!`
+        const winners = matchWinners(session)
+        if (winners.length === session.players.length && winners.length > 1) return "It's a tie!"
+        return winners.length > 1 ? `Tie: ${winners.map((player) => player.name).join(' & ')}` : `${winners[0].name} wins!`
+    }
+    function turnText() {
+        if (over) return winnerText()
+        if (pending) {
+            const result = pendingMatch ? 'A match!' : 'Not a match'
+            return readOnly ? result : `${result} — click anywhere to continue`
+        }
+        return session.turn === me ? 'Your turn' : `${current?.name ?? ''}'s turn`
     }
 
-    const board = <div className={`match-board${pending ? ' pending' : ''}`} style={{ gridTemplateColumns: `repeat(${columns}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }} aria-label="Matching cards">
+    const board = <div className={`match-board${pending ? ' pending' : ''}`} style={{ ['--cols' as string]: columns, ['--rows' as string]: rows }} aria-label="Matching cards">
         {session.cards.map((card, index) => {
             const matched = session.matched.includes(index)
             const faceUp = matched || session.flipped.includes(index)
@@ -58,8 +68,16 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
     </div>
 
     const scoreboard = <div className="match-scores" role="status" aria-live="polite">
-        {playerNames.map((name, player) => <span key={name} className={`match-score${!over && session.turn === player ? ' turn' : ''}`}><strong>{name}</strong> {session.scores[player]}</span>)}
-        <span className="match-turn">{over ? winnerText() : pending ? (readOnly ? (pendingMatch ? 'A match!' : 'Not a match') : `${pendingMatch ? 'A match!' : 'Not a match'} — click anywhere to continue`) : session.turn === me ? (locked ? 'Paused by your teacher' : 'Your turn') : `${playerNames[session.turn]}'s turn`}</span>
+        <div className="match-players">
+            {session.players.map((player, index) => {
+                const away = offline.includes(player.id)
+                return <span key={player.id} className={`match-score${!over && session.turn === index ? ' turn' : ''}${away ? ' away' : ''}`} title={away ? `${player.name} is not connected` : undefined}>
+                    <i className="match-dot" style={player.color ? { background: player.color } : undefined} aria-hidden="true" />
+                    <strong>{index === me ? `${player.name} (you)` : player.name}</strong> {session.scores[index]}{away && <small>away</small>}
+                </span>
+            })}
+        </div>
+        <span className="match-turn">{turnText()}</span>
     </div>
 
     if (readOnly) return <div className="card-deck matching-game read-only" role="dialog" aria-modal="true" aria-label="Matching game">
@@ -77,6 +95,7 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
             <div className="match-stage" onClick={pending ? onAdvance : undefined}>{board}</div>
             <div className="deck-bar">
                 <span className="deck-bar-note"><button className="deck-unlock" title="Change the words" onClick={onEdit}><Unlock size={14} /> Unlock to edit</button></span>
+                {!over && <button title={`Skip ${current?.name ?? 'this player'}'s turn`} onClick={onSkip}><SkipForward size={14} /> Skip turn</button>}
                 <button className="primary" title="Shuffle and start a new game" onClick={onStart}><RotateCcw size={14} /> New game</button>
             </div>
         </> : ready ? <>

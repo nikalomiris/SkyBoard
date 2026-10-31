@@ -13,8 +13,8 @@ import BlendingBoard from './components/BlendingBoard'
 import CardDeck, { DECK_ITEM_PREFIX, buildDeckPageItems, emptyDeckSession } from './components/CardDeck'
 import type { DeckSession } from './components/CardDeck'
 import MatchingGame from './components/MatchingGame'
-import { createMatchSession, emptyMatchSession, flipCard, advanceMatch, isMatchSession, maskMatchSession } from './lib/matchGame'
-import type { MatchPlayer, MatchSession } from './lib/matchGame'
+import { createMatchSession, emptyMatchSession, flipCard, advanceMatch, isMatchSession, maskMatchSession, skipTurn, skipUnavailable } from './lib/matchGame'
+import type { MatchSession } from './lib/matchGame'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
@@ -31,6 +31,8 @@ import {
     textFontOptions, dropRemovedItems,
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
+import { applyItemsEdit, diffItems, isItemsEdit, recordPendingEdit, reconcileSnapshot } from './lib/liveSync'
+import type { PendingEdits } from './lib/liveSync'
 import type { ItemBounds, Point, ResizeHandle } from './lib/boardGeometry'
 import type { BoardItem, ClipboardPage, DeckTile, GridCellStyle, Lesson, PageItems } from './lib/workspaceTypes'
 
@@ -44,6 +46,7 @@ type SizedTool = 'pen' | 'brush' | 'highlighter' | 'eraser'
 const sizedTools: SizedTool[] = ['pen', 'brush', 'highlighter', 'eraser']
 const sizePresets: Record<SizedTool, number[]> = { pen: [1, 2, 3, 5, 8, 12], brush: [5, 8, 11, 16, 24, 34], highlighter: [12, 18, 24, 34, 46, 60], eraser: [14, 20, 28, 44, 64, 84] }
 const toolOpacity: Record<SizedTool, number> = { pen: 1, brush: 0.76, highlighter: 0.42, eraser: 1 }
+const studentSendIntervalMs = 80
 const studentToolIds: Tool[] = ['select', 'pen', 'brush', 'highlighter', 'eraser', 'text']
 const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'select', label: 'Select', icon: MousePointer2 },
@@ -168,7 +171,7 @@ function App() {
         matchSessionRef.current = next
         setMatchSession(next)
     }
-    function playMatchCard(index: number, player: MatchPlayer) {
+    function playMatchCard(index: number, player: number) {
         const next = flipCard(matchSessionRef.current, index, player)
         if (next !== matchSessionRef.current) resetMatchSession(next)
     }
@@ -177,10 +180,28 @@ function App() {
         else playMatchCard(index, 0)
     }
     function advanceMatchTurn() {
-        const next = advanceMatch(matchSessionRef.current)
+        const next = advanceMatch(matchSessionRef.current, isMatchPlayerAvailable)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }
+    function skipMatchTurn() {
+        const next = skipTurn(matchSessionRef.current, isMatchPlayerAvailable)
         if (next !== matchSessionRef.current) resetMatchSession(next)
     }
     const [remoteMatch, setRemoteMatch] = useState<MatchSession>(emptyMatchSession)
+    const [remoteMatchOffline, setRemoteMatchOffline] = useState<string[]>([])
+    // Everyone with a personal link is a player; students who are not connected (or are paused) are skipped but keep their score.
+    const matchAvailabilityRef = useRef({ invites: [] as LessonInvite[], online: [] as string[], locked: [] as string[], allLocked: false })
+    function isInviteAvailable(inviteId: string) {
+        const { invites: all, online, locked, allLocked } = matchAvailabilityRef.current
+        return !allLocked && !locked.includes(inviteId) && online.includes(inviteId) && all.some((invite) => invite.id === inviteId && invite.status === 'admitted')
+    }
+    function isMatchPlayerAvailable(player: number) {
+        const id = matchSessionRef.current.players[player]?.id
+        return player === 0 || Boolean(id && isInviteAvailable(id))
+    }
+    function matchRoster() {
+        return invites.filter((invite) => invite.status !== 'removed').map((invite) => ({ id: invite.id, name: invite.label, color: invite.color }))
+    }
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
@@ -437,7 +458,7 @@ function App() {
     // Last page content known to match the teacher; student edits are sent as a diff against it.
     const studentBaseRef = useRef<{ pageIndex: number; items: BoardItem[] } | null>(null)
     // Student edits the teacher has not echoed back yet; they are re-applied over incoming teacher snapshots.
-    const studentPendingRef = useRef<{ pageIndex: number; upserts: Map<string, { item: BoardItem; at: number }>; removed: Map<string, number> } | null>(null)
+    const studentPendingRef = useRef<PendingEdits | null>(null)
     type LiveDraft = { kind: 'ink' | 'eraser' | 'laser'; pageIndex: number; points: string; color: string; width: number; opacity: number }
     const [remoteDraft, setRemoteDraft] = useState<LiveDraft | null>(null)
     const handleRemoteDraft = ({ payload }: { payload: unknown }) => {
@@ -451,10 +472,13 @@ function App() {
     blendStateRef.current = { open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor }
     const deckStateRef = useRef<{ open: boolean; tile: DeckTile | null }>({ open: false, tile: null })
     deckStateRef.current = { open: showDeck, tile: deckSession.order[deckSession.index] ?? null }
-    const matchStateRef = useRef({ open: false, session: emptyMatchSession })
-    matchStateRef.current = { open: showMatch, session: maskMatchSession(matchSession) }
+    matchAvailabilityRef.current = { invites, online: onlineInviteIds, locked: lockedInviteIds, allLocked: studentLocked }
+    const matchOffline = matchSession.players.filter((player, index) => index > 0 && !isInviteAvailable(player.id)).map((player) => player.id)
+    const matchStateRef = useRef<{ open: boolean; session: MatchSession; offline: string[] }>({ open: false, session: emptyMatchSession, offline: [] })
+    matchStateRef.current = { open: showMatch, session: maskMatchSession(matchSession), offline: matchOffline }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
+    const canvasLocked = studentView && studentLocked
     const lockedInviteIdsRef = useRef(lockedInviteIds)
     lockedInviteIdsRef.current = lockedInviteIds
     const broadcastLock = () => {
@@ -510,8 +534,9 @@ function App() {
         channel.on('broadcast', { event: 'match-flip' }, ({ payload }) => {
             const flip = payload as { index?: number; inviteId?: string }
             if (!matchStateRef.current.open || typeof flip?.index !== 'number') return
-            if (studentLockedRef.current || (flip.inviteId && lockedInviteIdsRef.current.includes(flip.inviteId))) return
-            playMatchCard(flip.index, 1)
+            if (!flip.inviteId || !isInviteAvailable(flip.inviteId)) return
+            const player = matchSessionRef.current.players.findIndex((candidate) => candidate.id === flip.inviteId)
+            if (player > 0) playMatchCard(flip.index, player)
         })
         channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
             const cursor = payload as { inviteId: string; x: number; y: number; name: string; color: string; pageIndex: number }
@@ -525,18 +550,14 @@ function App() {
         })
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
-            const edit = payload as { pageIndex: number; upserts: BoardItem[]; removed: string[] }
+            const edit = payload as unknown
             setRemoteDraft(null)
             const lessonId = openLessonIdRef.current
-            if (!lessonId || !edit || !Array.isArray(edit.upserts) || !Array.isArray(edit.removed) || edit.pageIndex !== liveStateRef.current.pageIndex) return
+            if (!lessonId || !isItemsEdit(edit) || edit.pageIndex !== liveStateRef.current.pageIndex) return
             // Merge by item id so concurrent edits from different students all survive.
             setItemsByPage((previous) => {
                 const key = `${lessonId}:${edit.pageIndex}`
-                const removed = new Set(edit.removed)
-                const upserts = new Map(edit.upserts.map((item) => [item.id, item]))
-                const existing = (previous[key] ?? []).filter((item) => !removed.has(item.id)).map((item) => upserts.get(item.id) ?? item)
-                const present = new Set(existing.map((item) => item.id))
-                return { ...previous, [key]: [...existing, ...edit.upserts.filter((item) => !present.has(item.id) && !removed.has(item.id))] }
+                return { ...previous, [key]: applyItemsEdit(previous[key] ?? [], edit) }
             })
         })
         channel.subscribe((status) => {
@@ -581,7 +602,13 @@ function App() {
     useEffect(() => {
         if (!shareSessionId || studentView) return
         broadcastMatchState()
-    }, [shareSessionId, studentView, showMatch, matchSession])
+    }, [shareSessionId, studentView, showMatch, matchSession, matchOffline.join(',')])
+    // A student who drops out (or is paused) during their turn loses it; the turn moves to the next available player.
+    useEffect(() => {
+        if (studentView) return
+        const next = skipUnavailable(matchSessionRef.current, isMatchPlayerAvailable)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }, [studentView, matchSession, invites, onlineInviteIds, lockedInviteIds, studentLocked])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -605,26 +632,49 @@ function App() {
         return () => window.clearTimeout(timeout)
     }, [draftActive, currentPoints, shareSessionId, studentView])
 
-    // Student: send local edits back to the teacher.
+    // A lock arriving mid-stroke or mid-drag must end that interaction without committing it.
+    useEffect(() => {
+        if (!canvasLocked) return
+        itemGestureRef.current = null
+        setDrawing(false)
+        setCurrentPoints('')
+        setLineDraft(null)
+        setEditingTextId(null)
+        setHoverVisible(false)
+    }, [canvasLocked])
+
+    // Student: send local edits back to the teacher. Item drags change on every pointer move, so sends are throttled.
+    const studentOutboxRef = useRef<PendingEdits | null>(null)
+    const studentSendTimerRef = useRef<number | undefined>(undefined)
+    const studentLastSendRef = useRef(0)
+    const flushStudentOutbox = () => {
+        window.clearTimeout(studentSendTimerRef.current)
+        studentSendTimerRef.current = undefined
+        const outbox = studentOutboxRef.current
+        studentOutboxRef.current = null
+        const channel = liveChannelRef.current
+        if (!outbox || !channel || !liveSubscribedRef.current) return
+        studentLastSendRef.current = Date.now()
+        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex: outbox.pageIndex, upserts: [...outbox.upserts.values()].map((entry) => entry.item), removed: [...outbox.removed.keys()] } })
+    }
     useEffect(() => {
         if (!studentView || !studentEditPendingRef.current) return
         studentEditPendingRef.current = false
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
         const base = studentBaseRef.current?.pageIndex === pageIndex ? studentBaseRef.current.items : []
-        const baseById = new Map(base.map((item) => [item.id, item]))
-        const currentIds = new Set(currentItems.map((item) => item.id))
-        const upserts = currentItems.filter((item) => baseById.get(item.id) !== item && JSON.stringify(baseById.get(item.id)) !== JSON.stringify(item))
-        const removed = base.filter((item) => !currentIds.has(item.id)).map((item) => item.id)
+        const { upserts, removed } = diffItems(base, currentItems)
         studentBaseRef.current = { pageIndex, items: currentItems }
         if (!upserts.length && !removed.length) return
         const now = Date.now()
-        const pending = studentPendingRef.current?.pageIndex === pageIndex ? studentPendingRef.current : { pageIndex, upserts: new Map(), removed: new Map() }
-        for (const item of upserts) { pending.upserts.set(item.id, { item, at: now }); pending.removed.delete(item.id) }
-        for (const itemId of removed) { pending.removed.set(itemId, now); pending.upserts.delete(itemId) }
-        studentPendingRef.current = pending
-        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, upserts, removed } })
+        studentPendingRef.current = recordPendingEdit(studentPendingRef.current, pageIndex, { upserts, removed }, now)
+        if (studentOutboxRef.current && studentOutboxRef.current.pageIndex !== pageIndex) flushStudentOutbox()
+        studentOutboxRef.current = recordPendingEdit(studentOutboxRef.current, pageIndex, { upserts, removed }, now)
+        const wait = studentSendIntervalMs - (now - studentLastSendRef.current)
+        if (wait <= 0) flushStudentOutbox()
+        else if (studentSendTimerRef.current === undefined) studentSendTimerRef.current = window.setTimeout(flushStudentOutbox, wait)
     }, [studentView, currentItems, pageIndex])
+    useEffect(() => () => window.clearTimeout(studentSendTimerRef.current), [])
 
     // Student: follow the teacher's page and show its live content.
     useEffect(() => {
@@ -653,23 +703,10 @@ function App() {
             setPages(live.pages)
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
             setPageIndex(live.pageIndex)
-            let merged = visible
-            const pending = studentPendingRef.current
-            if (pending && pending.pageIndex === live.pageIndex) {
-                const now = Date.now()
-                const byId = new Map(live.items.map((item) => [item.id, item]))
-                for (const [itemId, entry] of pending.upserts) {
-                    const echoed = byId.get(itemId)
-                    if ((echoed && JSON.stringify(echoed) === JSON.stringify(entry.item)) || now - entry.at > 5000) pending.upserts.delete(itemId)
-                }
-                for (const [itemId, at] of pending.removed) if (!byId.has(itemId) || now - at > 5000) pending.removed.delete(itemId)
-                merged = visible.filter((item) => !pending.removed.has(item.id)).map((item) => pending.upserts.get(item.id)?.item ?? item)
-                const present = new Set(merged.map((item) => item.id))
-                merged = [...merged, ...[...pending.upserts.values()].map((entry) => entry.item).filter((item) => !present.has(item.id))]
-            }
+            const merged = reconcileSnapshot(studentPendingRef.current, live.pageIndex, live.items, visible, Date.now())
             studentBaseRef.current = { pageIndex: live.pageIndex, items: merged }
             setLiveLessonPage({ index: live.pageIndex, items: merged, background: live.background ?? undefined })
-            setSelectedItemId(null)
+            setSelectedItemId((selected) => selected && merged.some((item) => item.id === selected) ? selected : null)
         })
         channel.on('broadcast', { event: 'bg' }, ({ payload }) => {
             if (!admitted()) return
@@ -710,8 +747,9 @@ function App() {
         })
         channel.on('broadcast', { event: 'match' }, ({ payload }) => {
             if (!admitted()) return
-            const match = payload as { open?: boolean; session?: unknown }
+            const match = payload as { open?: boolean; session?: unknown; offline?: string[] }
             setRemoteMatch(isMatchSession(match?.session) ? match.session : emptyMatchSession)
+            setRemoteMatchOffline(Array.isArray(match?.offline) ? match.offline : [])
             setShowMatch(Boolean(match?.open))
         })
         channel.subscribe((status) => {
@@ -937,6 +975,7 @@ function App() {
     }
 
     function updateCurrentItems(nextItems: BoardItem[] | ((items: BoardItem[]) => BoardItem[]), options?: { recordHistory?: boolean }) {
+        if (studentView && studentLockedRef.current) return
         const recordHistory = options?.recordHistory ?? true
         if (studentView) studentEditPendingRef.current = true
         touchOpenLesson()
@@ -955,6 +994,7 @@ function App() {
     }
 
     function undo() {
+        if (studentView && studentLockedRef.current) return
         const entry = historyRef.current[currentPageKey]
         if (!entry || !entry.past.length) return
         const previousState = entry.past[entry.past.length - 1]
@@ -968,6 +1008,7 @@ function App() {
     }
 
     function redo() {
+        if (studentView && studentLockedRef.current) return
         const entry = historyRef.current[currentPageKey]
         if (!entry || !entry.future.length) return
         const nextState = entry.future[entry.future.length - 1]
@@ -1700,7 +1741,7 @@ function App() {
     }
 
     function beginItemGesture(event: ReactPointerEvent<Element>, item: BoardItem) {
-        if (activeTool !== 'select' || studentView) return
+        if (activeTool !== 'select' || canvasLocked) return
         setSelectedItemId(item.id)
         event.stopPropagation()
         if (editingTextId && editingTextId !== item.id) endTextEditing()
@@ -1714,7 +1755,7 @@ function App() {
     }
 
     function resizeFromHandle(event: ReactPointerEvent<SVGCircleElement>, handle: ResizeHandle) {
-        if (!selectedItem) return
+        if (!selectedItem || studentView) return
         event.stopPropagation()
         const { stageX, stageY } = coordinates(event)
         itemGestureRef.current = { mode: 'resize', item: selectedItem, startX: stageX, startY: stageY, bounds: getItemBounds(selectedItem), handle }
@@ -1722,7 +1763,7 @@ function App() {
     }
 
     function rotateFromHandle(event: ReactPointerEvent<HTMLButtonElement>) {
-        if (!selectedItem || selectedItem.type !== 'shape' || selectedItem.shape === 'circle') return
+        if (studentView || !selectedItem || selectedItem.type !== 'shape' || selectedItem.shape === 'circle') return
         event.stopPropagation()
         const { stageX, stageY } = coordinates(event)
         const bounds = getItemBounds(selectedItem)
@@ -1884,7 +1925,7 @@ function App() {
     }
 
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
-        if (!stageRef.current) return
+        if (!stageRef.current || canvasLocked) return
         const { stageX, stageY } = coordinates(event)
         if (editingTextId) endTextEditing()
         if (activeTool === 'text' || activeTool === 'postit') return
@@ -1940,7 +1981,7 @@ function App() {
     }
 
     function onStageMove(event: ReactPointerEvent<HTMLElement>) {
-        if (!stageRef.current) return
+        if (!stageRef.current || canvasLocked) return
         if (event.pointerType !== 'touch' && sizedTools.includes(activeTool as SizedTool)) {
             const { stageX: hoverX, stageY: hoverY } = coordinates(event)
             hoverPosRef.current = [hoverX, hoverY]
@@ -1987,6 +2028,7 @@ function App() {
     }
 
     function onStageUp(event: ReactPointerEvent<HTMLElement>) {
+        if (canvasLocked) return
         if (itemGestureRef.current) {
             itemGestureRef.current = null
             return
@@ -2072,7 +2114,7 @@ function App() {
     }
 
     function onStageClick(event: ReactMouseEvent<HTMLElement>) {
-        if (!stageRef.current) return
+        if (!stageRef.current || canvasLocked) return
         const { stageX, stageY } = coordinates(event)
         if (activeTool === 'postit') {
             setPostitDraft({ left: stageX / 10, top: stageY / 6.2, text: 'Remember this sound!' })
@@ -2580,10 +2622,10 @@ function App() {
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Upload image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleBackgroundImage(event)} />{backgroundLibraryError && <p className="form-error" role="alert">{backgroundLibraryError}</p>}{backgroundLibrary.length > 0 && <div className="background-library"><span className="panel-small-label">YOUR BACKGROUNDS</span>{[...new Set(backgroundLibrary.map((entry) => entry.group))].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b)).map((group) => <div key={group} className="background-library-group" role="group" aria-label={group || 'Ungrouped'}>{group && <span className="background-library-group-name">{group}</span>}<div className="background-library-grid">{backgroundLibrary.filter((entry) => entry.group === group).map((entry) => <div key={entry.id} className="background-library-item"><button type="button" title={`Use ${entry.name}`} aria-label={`Use ${entry.name} background`} style={{ backgroundImage: `url("${entry.image}")` }} onClick={() => { setBackgroundDraft({ src: entry.image, fit: 'fill', scope: backgroundScope, libraryId: entry.id, name: entry.name, group: entry.group, newGroup: '' }); setShowBackgrounds(false) }} /><button type="button" className="background-library-remove" title={`Remove ${entry.name} from library`} aria-label={`Remove ${entry.name} from library`} onClick={() => void deleteLibraryBackground(entry)}><X size={12} /></button></div>)}</div></div>)}</div>}<div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
-                            {showMatch && <MatchingGame readOnly={studentView} locked={studentView && studentLocked} config={matchConfig} session={studentView ? remoteMatch : matchSession}
+                            {showMatch && <MatchingGame readOnly={studentView} myId={studentView ? studentInviteRef.current?.id ?? '' : 'teacher'} offline={studentView ? remoteMatchOffline : matchOffline} config={matchConfig} session={studentView ? remoteMatch : matchSession}
                                 onConfigChange={(matchGame) => { const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame } : lesson)) }}
-                                onStart={() => resetMatchSession(createMatchSession(matchConfig?.words ?? []))} onEdit={() => { resetMatchSession(emptyMatchSession); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame: { words: lesson.matchGame?.words ?? [], ready: false } } : lesson)) }}
-                                onFlip={handleMatchCardClick} onAdvance={advanceMatchTurn} onClose={() => setShowMatch(false)} />}
+                                onStart={() => resetMatchSession(createMatchSession(matchConfig?.words ?? [], matchRoster()))} onEdit={() => { resetMatchSession(emptyMatchSession); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame: { words: lesson.matchGame?.words ?? [], ready: false } } : lesson)) }}
+                                onFlip={handleMatchCardClick} onAdvance={advanceMatchTurn} onSkip={skipMatchTurn} onClose={() => setShowMatch(false)} />}
                             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                                 {renderSelectedItemToolbar()}
@@ -2633,13 +2675,13 @@ function App() {
                                             const centerX = bounds.left + bounds.width / 2
                                             return <g className="selection-frame">
                                                 <rect x={bounds.left - 5} y={bounds.top - 5} width={bounds.width + 10} height={bounds.height + 10} fill="none" stroke="var(--accent)" strokeWidth="2" strokeDasharray="5 4" pointerEvents="none" />
-                                                {selectedItem.type === 'shape' && selectedItem.shape !== 'circle' && <>
+                                                {!studentView && selectedItem.type === 'shape' && selectedItem.shape !== 'circle' && <>
                                                     <line x1={centerX} y1={bounds.top - 5} x2={centerX} y2={bounds.top - 19} stroke="var(--accent)" strokeWidth="2" pointerEvents="none" />
                                                     <foreignObject x={centerX - 12} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Rotate shape" aria-label="Rotate shape" onPointerDown={rotateFromHandle}><RotateCw size={13} /></button></foreignObject>
                                                 </>}
                                                 {selectedItem.type === 'image' && !studentView && <foreignObject x={bounds.left + bounds.width - 19} y={bounds.top - 43} width="24" height="24"><button type="button" className="selection-rotate-handle" title="Crop image" aria-label="Crop image" onPointerDown={(event) => event.stopPropagation()} onClick={() => setCropQueue([{ src: selectedItem.src, label: selectedItem.label, left: selectedItem.left, top: selectedItem.top, itemId: selectedItem.id }])}><Crop size={13} /></button></foreignObject>}
                                                 <rect className="selection-move-handle" x={centerX - 17} y={bounds.top - 15} width="34" height="12" rx="4" onPointerDown={(event) => beginItemGesture(event, selectedItem)} />
-                                                {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => {
+                                                {!studentView && (['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((handle) => {
                                                     const cx = handle.endsWith('right') ? bounds.left + bounds.width + 5 : bounds.left - 5
                                                     const cy = handle.startsWith('bottom') ? bounds.top + bounds.height + 5 : bounds.top - 5
                                                     const cursor = handle === 'top-left' || handle === 'bottom-right' ? '' : ' selection-resize-handle-nesw'

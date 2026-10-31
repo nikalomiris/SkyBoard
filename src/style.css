@@ -5853,26 +5853,36 @@ button.deck-chip.selected {
 
 .match-scores {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 14px;
+    gap: 6px;
     padding: 8px 14px;
     background: white;
     color: #5f6b66;
     font: 14px var(--font-ui);
 }
 
+.match-players {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
 .match-score {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     padding: 4px 14px;
     border: 2px solid transparent;
     border-radius: 999px;
     background: color-mix(in srgb, var(--board-accent) 10%, white);
     color: var(--ink);
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s, opacity 0.2s;
 }
 
 .match-score strong {
-    margin-right: 6px;
     font-weight: 600;
 }
 
@@ -5881,15 +5891,36 @@ button.deck-chip.selected {
     background: color-mix(in srgb, var(--board-accent) 28%, white);
 }
 
+.match-score.away {
+    opacity: 0.55;
+}
+
+.match-score small {
+    padding: 0 6px;
+    border-radius: 999px;
+    background: #0000001a;
+    font-size: 11px;
+}
+
+.match-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--board-accent);
+}
+
 .match-turn {
-    min-width: 130px;
     font-weight: 600;
     color: color-mix(in srgb, var(--board-accent) 48%, #26384a);
 }
 
 .match-board {
-    display: grid;
-    gap: clamp(6px, 1.4vw, 16px);
+    --gap: clamp(6px, 1.4vw, 16px);
+    display: flex;
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    gap: var(--gap);
     flex: 1;
     width: 100%;
     max-width: 1000px;
@@ -5897,6 +5928,8 @@ button.deck-chip.selected {
 }
 
 .match-card {
+    flex: 0 0 calc((100% - (var(--cols) - 1) * var(--gap)) / var(--cols));
+    height: calc((100% - (var(--rows) - 1) * var(--gap)) / var(--rows));
     min-width: 0;
     min-height: 0;
     padding: 0;
