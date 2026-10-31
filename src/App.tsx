@@ -19,7 +19,7 @@ import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBo
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, TEXT_LINE_HEIGHT } from './lib/boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, TEXT_LINE_HEIGHT, fitGridFontSize } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 import { addLibraryBackground, backgroundImageMaxDimension, coverImageMaxDimension, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadLessonPages, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
@@ -434,6 +434,10 @@ function App() {
     const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
     const liveSubscribedRef = useRef(false)
     const studentEditPendingRef = useRef(false)
+    // Last page content known to match the teacher; student edits are sent as a diff against it.
+    const studentBaseRef = useRef<{ pageIndex: number; items: BoardItem[] } | null>(null)
+    // Student edits the teacher has not echoed back yet; they are re-applied over incoming teacher snapshots.
+    const studentPendingRef = useRef<{ pageIndex: number; upserts: Map<string, { item: BoardItem; at: number }>; removed: Map<string, number> } | null>(null)
     type LiveDraft = { kind: 'ink' | 'eraser' | 'laser'; pageIndex: number; points: string; color: string; width: number; opacity: number }
     const [remoteDraft, setRemoteDraft] = useState<LiveDraft | null>(null)
     const handleRemoteDraft = ({ payload }: { payload: unknown }) => {
@@ -521,11 +525,19 @@ function App() {
         })
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
-            const edit = payload as { pageIndex: number; items: BoardItem[] }
+            const edit = payload as { pageIndex: number; upserts: BoardItem[]; removed: string[] }
             setRemoteDraft(null)
             const lessonId = openLessonIdRef.current
-            if (!lessonId || !edit || !Array.isArray(edit.items) || edit.pageIndex !== liveStateRef.current.pageIndex) return
-            setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${edit.pageIndex}`]: edit.items }))
+            if (!lessonId || !edit || !Array.isArray(edit.upserts) || !Array.isArray(edit.removed) || edit.pageIndex !== liveStateRef.current.pageIndex) return
+            // Merge by item id so concurrent edits from different students all survive.
+            setItemsByPage((previous) => {
+                const key = `${lessonId}:${edit.pageIndex}`
+                const removed = new Set(edit.removed)
+                const upserts = new Map(edit.upserts.map((item) => [item.id, item]))
+                const existing = (previous[key] ?? []).filter((item) => !removed.has(item.id)).map((item) => upserts.get(item.id) ?? item)
+                const present = new Set(existing.map((item) => item.id))
+                return { ...previous, [key]: [...existing, ...edit.upserts.filter((item) => !present.has(item.id) && !removed.has(item.id))] }
+            })
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
@@ -599,7 +611,19 @@ function App() {
         studentEditPendingRef.current = false
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
-        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, items: currentItems } })
+        const base = studentBaseRef.current?.pageIndex === pageIndex ? studentBaseRef.current.items : []
+        const baseById = new Map(base.map((item) => [item.id, item]))
+        const currentIds = new Set(currentItems.map((item) => item.id))
+        const upserts = currentItems.filter((item) => baseById.get(item.id) !== item && JSON.stringify(baseById.get(item.id)) !== JSON.stringify(item))
+        const removed = base.filter((item) => !currentIds.has(item.id)).map((item) => item.id)
+        studentBaseRef.current = { pageIndex, items: currentItems }
+        if (!upserts.length && !removed.length) return
+        const now = Date.now()
+        const pending = studentPendingRef.current?.pageIndex === pageIndex ? studentPendingRef.current : { pageIndex, upserts: new Map(), removed: new Map() }
+        for (const item of upserts) { pending.upserts.set(item.id, { item, at: now }); pending.removed.delete(item.id) }
+        for (const itemId of removed) { pending.removed.set(itemId, now); pending.upserts.delete(itemId) }
+        studentPendingRef.current = pending
+        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, upserts, removed } })
     }, [studentView, currentItems, pageIndex])
 
     // Student: follow the teacher's page and show its live content.
@@ -629,7 +653,22 @@ function App() {
             setPages(live.pages)
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
             setPageIndex(live.pageIndex)
-            setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background ?? undefined })
+            let merged = visible
+            const pending = studentPendingRef.current
+            if (pending && pending.pageIndex === live.pageIndex) {
+                const now = Date.now()
+                const byId = new Map(live.items.map((item) => [item.id, item]))
+                for (const [itemId, entry] of pending.upserts) {
+                    const echoed = byId.get(itemId)
+                    if ((echoed && JSON.stringify(echoed) === JSON.stringify(entry.item)) || now - entry.at > 5000) pending.upserts.delete(itemId)
+                }
+                for (const [itemId, at] of pending.removed) if (!byId.has(itemId) || now - at > 5000) pending.removed.delete(itemId)
+                merged = visible.filter((item) => !pending.removed.has(item.id)).map((item) => pending.upserts.get(item.id)?.item ?? item)
+                const present = new Set(merged.map((item) => item.id))
+                merged = [...merged, ...[...pending.upserts.values()].map((entry) => entry.item).filter((item) => !present.has(item.id))]
+            }
+            studentBaseRef.current = { pageIndex: live.pageIndex, items: merged }
+            setLiveLessonPage({ index: live.pageIndex, items: merged, background: live.background ?? undefined })
             setSelectedItemId(null)
         })
         channel.on('broadcast', { event: 'bg' }, ({ payload }) => {
@@ -2296,12 +2335,15 @@ function App() {
             const cols = item.cols ?? 3
             const rows = item.rows ?? 3
             const total = cols * rows
+            // Board-unit cell size minus the grid padding, gaps, borders and input padding.
+            const cellWidth = (294 * scale - 14 - 5 * (cols - 1)) / cols - 8
+            const cellHeight = (184 * scale - 14 - 5 * (rows - 1)) / rows - 2
             return (
                 <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
                     <div className="board-grid" data-grid-id={item.id} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
                         {item.values.map((value, index) => {
                             const cellStyle = item.cellStyles?.[index]
-                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ textAlign: cellStyle?.align ?? 'center', color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${(cellStyle?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
+                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ textAlign: cellStyle?.align ?? 'center', color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${fitGridFontSize(value, (cellStyle?.fontSize ?? item.fontSize ?? 20) * scale, cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont, cellWidth, cellHeight)}px`, padding: '0 2px', fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
                         })}
                     </div>
                 </foreignObject>
