@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
-    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
+    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight, Crosshair,
     ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
     MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
@@ -56,7 +56,7 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'text', label: 'Text', icon: Type },
     { id: 'shape', label: 'Shapes', icon: Shapes },
     { id: 'grid', label: 'Word grid', icon: Grid2X2 },
-    { id: 'laser', label: 'Laser pointer', icon: Sparkles },
+    { id: 'laser', label: 'Laser pointer', icon: Crosshair },
 ]
 type LessonSortKey = 'edited-desc' | 'edited-asc' | 'name-asc' | 'name-desc'
 const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited', 'edited-asc': 'Oldest edited', 'name-asc': 'Name (A–Z)', 'name-desc': 'Name (Z–A)' }
