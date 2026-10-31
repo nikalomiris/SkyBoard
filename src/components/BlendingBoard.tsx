@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Dispatch, PointerEvent as ReactPointerEvent, SetStateAction } from 'react'
+import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react'
 import { Check, Eraser, Hand, Pen, Trash2, X } from 'lucide-react'
 
 export type BlendTile = { id: string; text: string; x: number; y: number; kind?: string }
@@ -95,7 +95,7 @@ function tileSize(text: string) {
     return syllableLabelSizes[text] ?? { width: Math.max(TILE_W, Math.ceil(textWidth(text) + TILE_PADDING)), height: TILE_H }
 }
 
-export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, onDraft, remoteDraft, onClose, readOnly = false, color, onColorChange }: {
+export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, onDraft, remoteDraft, onClose, headerExtra, readOnly = false, color, onColorChange }: {
     tiles: BlendTile[]
     setTiles: Dispatch<SetStateAction<BlendTile[]>>
     strokes: BlendStroke[]
@@ -103,6 +103,7 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
     onDraft?: (draft: BlendDraft | null) => void
     remoteDraft?: BlendDraft | null
     onClose: () => void
+    headerExtra?: ReactNode
     readOnly?: boolean
     color?: string | null
     onColorChange?: (color: string) => void
@@ -236,6 +237,7 @@ export default function BlendingBoard({ tiles, setTiles, strokes, setStrokes, on
     return <div className={`blending-board${readOnly ? ' read-only' : ''}${drawTool ? ' drawing-mode' : ''}`} style={{ ['--board-accent' as string]: accentColor }}>
         {!readOnly && <div className="blending-tabs">
             {tabs.map((tab) => <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => setActiveTab(tab)}>{tab}</button>)}
+            {headerExtra}
             <button className="blending-close" onClick={onClose} aria-label="Close blending board" title="Close"><X size={16} /></button>
         </div>}
         {!readOnly && <div className="blending-tray">

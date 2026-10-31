@@ -6135,3 +6135,16 @@ button.deck-chip.selected {
 .image-notice.success { background: #eaf6e6; color: #1f5130; border-color: #8fd19e; }
 .image-notice.error { background: #fce8e8; color: #7a1f1f; border-color: #f4a6b8; }
 .image-notice button { border: 0; background: transparent; color: inherit; cursor: pointer; display: grid; place-items: center; }
+
+.tutorial-overlay { position: fixed; inset: 0; z-index: 2000; }
+.tutorial-blur { position: fixed; background: rgba(20, 24, 36, 0.28); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.tutorial-highlight { position: fixed; border-radius: 10px; border: 2px solid #fff; box-shadow: 0 0 0 3px #4c7cf0, 0 0 18px rgba(76, 124, 240, 0.6); pointer-events: none; }
+.tutorial-card { position: fixed; box-sizing: border-box; padding: 14px 16px; border-radius: 12px; background: #fff; color: #1f2430; box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28); display: grid; gap: 6px; }
+.tutorial-card p { margin: 0; font-size: 14px; line-height: 1.4; }
+.tutorial-card .tutorial-progress { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #6b7280; }
+.tutorial-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.tutorial-skip { border: 0; background: none; color: #6b7280; cursor: pointer; font: inherit; font-size: 13px; }
+.tutorial-next { border: 0; border-radius: 8px; padding: 7px 16px; background: #4c7cf0; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.modal-close.tutorial-help-button, .invite-modal .tutorial-help-button { position: absolute; top: 12px; right: 52px; }
+.blending-tabs .tutorial-help-button { margin-left: auto; width: 28px; height: 28px; }
+.panel-heading .tutorial-help-button { margin-left: auto; margin-right: 4px; }
