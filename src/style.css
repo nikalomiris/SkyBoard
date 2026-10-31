@@ -5719,31 +5719,124 @@ button.deck-chip.selected {
     padding: 16px 20px;
 }
 
+.match-prep-stage {
+    justify-content: center;
+    overflow-y: auto;
+    background: radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--board-accent) 22%, transparent), transparent 55%),
+        radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--board-accent) 16%, transparent), transparent 50%);
+}
+
 .match-prep {
-    align-items: stretch;
-    width: min(560px, 100%);
-    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: min(600px, 100%);
+    padding: 24px 28px;
+    border-radius: 20px;
+    background: white;
+    box-shadow: 0 1px 0 #ffffffcc inset, 0 10px 34px color-mix(in srgb, var(--board-accent) 30%, transparent), 0 1px 4px #0000001f;
     font: 14px var(--font-ui);
+}
+
+.match-prep-heading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.match-prep-heading h2 {
+    margin: 0;
+    color: color-mix(in srgb, var(--board-accent) 48%, #26384a);
+    font: 600 20px var(--font-ui);
+}
+
+.match-prep-heading p {
+    margin: 2px 0 0;
+    color: #5f6b66;
+}
+
+.match-prep-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--board-accent) 18%, white);
+    color: color-mix(in srgb, var(--board-accent) 70%, #26384a);
+}
+
+.match-prep label {
+    color: #26384a;
+    font-weight: 600;
+}
+
+.match-prep label em {
+    margin-left: 6px;
+    color: #7b8680;
+    font-style: normal;
+    font-weight: 400;
 }
 
 .match-prep textarea {
     resize: vertical;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: white;
+    min-height: 120px;
+    padding: 12px 14px;
+    border: 1.5px solid var(--line);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--board-accent) 4%, white);
     color: var(--ink);
-    font: 16px / 1.5 var(--font-board);
+    font: 17px / 1.5 var(--font-board);
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.match-prep small {
-    color: #5f6b66;
+.match-prep textarea:focus {
+    outline: 0;
+    border-color: var(--board-accent);
+    background: white;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--board-accent) 24%, transparent);
+}
+
+.match-prep-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.match-count {
+    padding: 3px 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--board-accent) 14%, white);
+    color: color-mix(in srgb, var(--board-accent) 60%, #26384a);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.match-count.over {
+    background: #fdeeee;
+    color: #b3402c;
 }
 
 .match-error {
     margin: 0;
     color: #b3402c;
     font-weight: 500;
+}
+
+.match-chip {
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--board-accent) 16%, white);
+    color: color-mix(in srgb, var(--board-accent) 52%, #26384a);
+    font: 500 16px var(--font-board);
+}
+
+.match-preview {
+    justify-content: flex-start;
+    max-height: 120px;
+    overflow-y: auto;
 }
 
 .match-word-list {
@@ -5754,8 +5847,7 @@ button.deck-chip.selected {
     max-width: 760px;
 }
 
-.match-word-list .deck-chip {
-    padding: 6px 14px;
+.match-word-list .match-chip {
     font-size: 18px;
 }
 

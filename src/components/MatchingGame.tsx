@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Lock, RotateCcw, Unlock, X } from 'lucide-react'
+import { Lock, RotateCcw, Sparkles, Unlock, X } from 'lucide-react'
 import { MAX_MATCH_WORDS, MIN_MATCH_WORDS, hasPendingPair, isPendingMatch, isRoundOver, parseMatchWords } from '../lib/matchGame'
 import type { MatchPlayer, MatchSession } from '../lib/matchGame'
 import type { MatchGameConfig } from '../lib/workspaceTypes'
@@ -81,7 +81,7 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
             </div>
         </> : ready ? <>
             <div className="match-stage match-ready">
-                <div className="match-word-list" aria-label="Words">{(config?.words ?? []).map((word) => <span key={word} className="deck-chip deck-consonant">{word}</span>)}</div>
+                <div className="match-word-list" aria-label="Words">{(config?.words ?? []).map((word) => <span key={word} className="match-chip">{word}</span>)}</div>
                 <p className="deck-empty">{(config?.words ?? []).length * 2} cards will be shuffled. Press Start to play.</p>
             </div>
             <div className="deck-bar">
@@ -89,15 +89,27 @@ export default function MatchingGame({ readOnly = false, locked = false, config,
                 <button className="primary" onClick={onStart}>Start</button>
             </div>
         </> : <>
-            <div className="match-stage match-prep">
-                <label htmlFor="match-words">Words (one per line or separated by commas)</label>
-                <textarea id="match-words" value={text} rows={10} placeholder={'cat\ndog\nsun'} onChange={(event) => {
-                    setText(event.target.value)
-                    setError('')
-                    onConfigChange?.({ words: parseMatchWords(event.target.value), ready: false })
-                }} />
-                <small>{words.length} {words.length === 1 ? 'word' : 'words'} · each one becomes a pair of cards (max {MAX_MATCH_WORDS})</small>
-                {error && <p className="match-error" role="alert">{error}</p>}
+            <div className="match-stage match-prep-stage">
+                <div className="match-prep">
+                    <div className="match-prep-heading">
+                        <span className="match-prep-icon" aria-hidden="true"><Sparkles size={20} /></span>
+                        <div>
+                            <h2>Build your matching game</h2>
+                            <p>Add the words to practise. Each word becomes a pair of cards.</p>
+                        </div>
+                    </div>
+                    <label htmlFor="match-words">Words <em>one per line or separated by commas</em></label>
+                    <textarea id="match-words" value={text} rows={6} placeholder={'cat\ndog\nsun'} onChange={(event) => {
+                        setText(event.target.value)
+                        setError('')
+                        onConfigChange?.({ words: parseMatchWords(event.target.value), ready: false })
+                    }} />
+                    {words.length > 0 && <div className="match-word-list match-preview" aria-label="Preview of the words">{words.map((word) => <span key={word} className="match-chip">{word}</span>)}</div>}
+                    <div className="match-prep-footer">
+                        <span className={`match-count${words.length > MAX_MATCH_WORDS ? ' over' : ''}`}>{words.length} / {MAX_MATCH_WORDS} words · {Math.min(words.length, MAX_MATCH_WORDS) * 2} cards</span>
+                        {error && <span className="match-error" role="alert">{error}</span>}
+                    </div>
+                </div>
             </div>
             <div className="deck-bar">
                 <span className="deck-bar-note"><Lock size={14} /> Words are saved with the lesson</span>
