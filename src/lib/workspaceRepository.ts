@@ -1,12 +1,12 @@
 import { supabase } from './supabase'
-import type { BoardItem, CardDeckConfig, Lesson, WorkspaceData } from './workspaceTypes'
+import type { BoardItem, CardDeckConfig, Lesson, MatchGameConfig, WorkspaceData } from './workspaceTypes'
 
 const folderSeparator = ' / '
 const assetBucket = 'lesson-assets'
 
 type StudentRow = { id: string; name: string; position: number; is_mock: boolean }
 type FolderRow = { id: string; student_id: string; parent_id: string | null; name: string; position: number }
-type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; card_deck: CardDeckConfig | null; is_mock: boolean; updated_at: string }
+type LessonRow = { id: string; student_id: string | null; folder_id: string | null; title: string; position: number; cover: string | null; cover_image: string | null; color: string; tags: string[]; card_deck: CardDeckConfig | null; match_game: MatchGameConfig | null; is_mock: boolean; updated_at: string }
 type PageMetadataRow = { id: string; lesson_id: string; name: string; position: number }
 type PageRow = PageMetadataRow & { elements: BoardItem[]; background: string }
 type LessonPreviewRow = { lesson_id: string; background: string; elements: BoardItem[] }
@@ -31,7 +31,7 @@ function foldersKeyOf(folders: string[], lessons: Lesson[]) {
 }
 
 function lessonFingerprint(lesson: Lesson, position: number) {
-    return JSON.stringify([position, lesson.title, lesson.folder, lesson.color, lesson.cover ?? null, lesson.coverImage ?? null, lesson.tags ?? [], lesson.cardDeck ?? null])
+    return JSON.stringify([position, lesson.title, lesson.folder, lesson.color, lesson.cover ?? null, lesson.coverImage ?? null, lesson.tags ?? [], lesson.cardDeck ?? null, lesson.matchGame ?? null])
 }
 
 type AssetWriteRow = { owner_id: string; lesson_id: string; page_id: string; storage_path: string; file_name: string; content_type: string; size_bytes: number }
@@ -118,7 +118,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         client.from('profiles').select('workspace_initialized').eq('id', ownerId).maybeSingle(),
         client.from('students').select('id,name,position,is_mock').eq('owner_id', ownerId).order('position'),
         client.from('student_folders').select('id,student_id,parent_id,name,position').eq('owner_id', ownerId).order('position'),
-        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,card_deck,is_mock,updated_at').eq('owner_id', ownerId).order('position'),
+        client.from('lessons').select('id,student_id,folder_id,title,position,cover,cover_image,color,tags,card_deck,match_game,is_mock,updated_at').eq('owner_id', ownerId).order('position'),
         client.from('lesson_pages').select('id,lesson_id,name,position').eq('owner_id', ownerId).order('position'),
         client.rpc('get_lesson_previews'),
     ])
@@ -188,6 +188,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
             coverImage: row.cover_image ?? undefined,
             tags: row.tags ?? [],
             cardDeck: row.card_deck ?? undefined,
+            matchGame: row.match_game ?? undefined,
             isMock: row.is_mock,
             kind: 'lesson',
         }
@@ -426,6 +427,7 @@ export async function saveWorkspace(ownerId: string, folders: string[], lessons:
             color: lesson.color,
             tags: lesson.tags ?? [],
             card_deck: lesson.cardDeck ?? null,
+            match_game: lesson.matchGame ?? null,
         }
     })
     const changedLessonRows = lessonRows.filter((row) => known?.lessonFingerprints.get(row.id) !== lessonFingerprints.get(row.id))

@@ -12,6 +12,9 @@ import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
 import CardDeck, { DECK_ITEM_PREFIX, buildDeckPageItems, emptyDeckSession } from './components/CardDeck'
 import type { DeckSession } from './components/CardDeck'
+import MatchingGame from './components/MatchingGame'
+import { createMatchSession, emptyMatchSession, flipCard, advanceMatch, isMatchSession, maskMatchSession } from './lib/matchGame'
+import type { MatchPlayer, MatchSession } from './lib/matchGame'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
@@ -151,6 +154,8 @@ function App() {
         setShowBlend(false)
         setShowDeck(false)
         setDeckSession(emptyDeckSession)
+        setShowMatch(false)
+        resetMatchSession(emptyMatchSession)
         setPageSelectionMode(false)
         setSelectedPageIndices([])
     }, [openLesson?.id])
@@ -159,6 +164,28 @@ function App() {
     const [deckSession, setDeckSession] = useState<DeckSession>(emptyDeckSession)
     const [remoteDeckTile, setRemoteDeckTile] = useState<DeckTile | null>(null)
     const deckConfig = lessons.find((lesson) => lesson.id === openLesson?.id)?.cardDeck
+    // Matching game: the words are saved with the lesson; the board is transient and the teacher's browser is authoritative.
+    const [showMatch, setShowMatch] = useState(false)
+    const [matchSession, setMatchSession] = useState<MatchSession>(emptyMatchSession)
+    const matchSessionRef = useRef<MatchSession>(emptyMatchSession)
+    const matchConfig = lessons.find((lesson) => lesson.id === openLesson?.id)?.matchGame
+    function resetMatchSession(next: MatchSession) {
+        matchSessionRef.current = next
+        setMatchSession(next)
+    }
+    function playMatchCard(index: number, player: MatchPlayer) {
+        const next = flipCard(matchSessionRef.current, index, player)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }
+    function handleMatchCardClick(index: number) {
+        if (studentView) sendLive('match-flip', { index, inviteId: studentInviteRef.current?.id })
+        else playMatchCard(index, 0)
+    }
+    function advanceMatchTurn() {
+        const next = advanceMatch(matchSessionRef.current)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }
+    const [remoteMatch, setRemoteMatch] = useState<MatchSession>(emptyMatchSession)
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
@@ -427,6 +454,8 @@ function App() {
     blendStateRef.current = { open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor }
     const deckStateRef = useRef<{ open: boolean; tile: DeckTile | null }>({ open: false, tile: null })
     deckStateRef.current = { open: showDeck, tile: deckSession.order[deckSession.index] ?? null }
+    const matchStateRef = useRef({ open: false, session: emptyMatchSession })
+    matchStateRef.current = { open: showMatch, session: maskMatchSession(matchSession) }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
     const lockedInviteIdsRef = useRef(lockedInviteIds)
@@ -488,6 +517,11 @@ function App() {
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'deck', payload: deckStateRef.current })
     }
+    const broadcastMatchState = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'match', payload: matchStateRef.current })
+    }
     const broadcastBackground = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
@@ -502,6 +536,7 @@ function App() {
         void channel.send({ type: 'broadcast', event: 'state', payload: { ...live, background: live.background.length > inlineBackgroundLimit ? null : live.background } })
         broadcastBlendState()
         broadcastDeckState()
+        broadcastMatchState()
         broadcastLock()
         broadcastGameState()
     }
@@ -518,6 +553,12 @@ function App() {
             setOnlineInviteIds([...new Set(members.filter((member) => member.role === 'student' && member.inviteId).map((member) => member.inviteId as string))])
         })
         channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
+        channel.on('broadcast', { event: 'match-flip' }, ({ payload }) => {
+            const flip = payload as { index?: number; inviteId?: string }
+            if (!matchStateRef.current.open || typeof flip?.index !== 'number') return
+            if (studentLockedRef.current || (flip.inviteId && lockedInviteIdsRef.current.includes(flip.inviteId))) return
+            playMatchCard(flip.index, 1)
+        })
         channel.on('broadcast', { event: 'rtc' }, ({ payload }) => { void gamePublisherRef.current?.handle(payload as GameSignal) })
         channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
             const cursor = payload as { inviteId: string; x: number; y: number; name: string; color: string; pageIndex: number }
@@ -587,6 +628,10 @@ function App() {
         if (!shareSessionId || studentView) return
         broadcastDeckState()
     }, [shareSessionId, studentView, showDeck, deckSession])
+    useEffect(() => {
+        if (!shareSessionId || studentView) return
+        broadcastMatchState()
+    }, [shareSessionId, studentView, showMatch, matchSession])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -700,6 +745,12 @@ function App() {
             const deck = payload as { open?: boolean; tile?: DeckTile | null }
             setRemoteDeckTile(deck?.tile && typeof deck.tile.text === 'string' ? deck.tile : null)
             setShowDeck(Boolean(deck?.open))
+        })
+        channel.on('broadcast', { event: 'match' }, ({ payload }) => {
+            if (!admitted()) return
+            const match = payload as { open?: boolean; session?: unknown }
+            setRemoteMatch(isMatchSession(match?.session) ? match.session : emptyMatchSession)
+            setShowMatch(Boolean(match?.open))
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
@@ -2604,12 +2655,16 @@ function App() {
                                     })}</div>
                                 </div>}
                             </div> : <div />}
-                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="icon-button" title="Add a web page or game" aria-label="Add a web page or game" onClick={() => setShowWebDialog(true)}><Gamepad2 size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
+                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false); setShowMatch(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false); setShowMatch(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <button className={`blend-button ${showMatch ? 'active' : ''}`} aria-pressed={showMatch} onClick={() => { setShowMatch(!showMatch); setShowBlend(false); setShowDeck(false) }}><LayoutGrid size={16} /> Matching game</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="icon-button" title="Add a web page or game" aria-label="Add a web page or game" onClick={() => setShowWebDialog(true)}><Gamepad2 size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Upload image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleBackgroundImage(event)} />{backgroundLibraryError && <p className="form-error" role="alert">{backgroundLibraryError}</p>}{backgroundLibrary.length > 0 && <div className="background-library"><span className="panel-small-label">YOUR BACKGROUNDS</span>{[...new Set(backgroundLibrary.map((entry) => entry.group))].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b)).map((group) => <div key={group} className="background-library-group" role="group" aria-label={group || 'Ungrouped'}>{group && <span className="background-library-group-name">{group}</span>}<div className="background-library-grid">{backgroundLibrary.filter((entry) => entry.group === group).map((entry) => <div key={entry.id} className="background-library-item"><button type="button" title={`Use ${entry.name}`} aria-label={`Use ${entry.name} background`} style={{ backgroundImage: `url("${entry.image}")` }} onClick={() => { setBackgroundDraft({ src: entry.image, fit: 'fill', scope: backgroundScope, libraryId: entry.id, name: entry.name, group: entry.group, newGroup: '' }); setShowBackgrounds(false) }} /><button type="button" className="background-library-remove" title={`Remove ${entry.name} from library`} aria-label={`Remove ${entry.name} from library`} onClick={() => void deleteLibraryBackground(entry)}><X size={12} /></button></div>)}</div></div>)}</div>}<div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
+                            {showMatch && <MatchingGame readOnly={studentView} locked={studentView && studentLocked} config={matchConfig} session={studentView ? remoteMatch : matchSession}
+                                onConfigChange={(matchGame) => { const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame } : lesson)) }}
+                                onStart={() => resetMatchSession(createMatchSession(matchConfig?.words ?? []))} onEdit={() => { resetMatchSession(emptyMatchSession); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame: { words: lesson.matchGame?.words ?? [], ready: false } } : lesson)) }}
+                                onFlip={handleMatchCardClick} onAdvance={advanceMatchTurn} onClose={() => setShowMatch(false)} />}
                             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                                 {renderSelectedItemToolbar()}

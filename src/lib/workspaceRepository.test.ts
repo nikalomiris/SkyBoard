@@ -22,6 +22,7 @@ const lesson = {
     color: '#ffffff',
     tags: [],
     card_deck: null,
+    match_game: null,
     is_mock: false,
     updated_at: '2026-10-30T00:00:00.000Z',
 }
