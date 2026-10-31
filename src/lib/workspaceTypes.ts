@@ -8,14 +8,15 @@ export type BoardItem = { id: string; scale?: number } & (
     | { type: 'grid'; left: number; top: number; values: string[]; rows?: number; cols?: number; fontSize?: number; fontFamily?: string; color?: string; cellStyles?: GridCellStyle[] }
     | { type: 'image'; left: number; top: number; src: string; label: string; storagePath?: string }
     | { type: 'pdf'; left: number; top: number; src: string; label: string; storagePath?: string }
-    | { type: 'web'; left: number; top: number; url: string; title: string; zoom?: number }
 )
 
 export type DeckTile = { text: string; kind?: string }
 export type CardDeckConfig = { tiles: DeckTile[]; ready: boolean }
 
+export type MatchGameConfig = { words: string[]; ready: boolean }
+
 export type LessonCover = 'page' | 'vowels' | 'blends' | 'safari' | 'magic' | 'custom'
-export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; updatedAt?: number; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; cardDeck?: CardDeckConfig; isMock?: boolean; kind: 'lesson' }
+export type Lesson = { id: string; title: string; folder: string; pages: string[]; updated: string; updatedAt?: number; color: string; cover?: LessonCover; coverImage?: string; tags?: string[]; cardDeck?: CardDeckConfig; matchGame?: MatchGameConfig; isMock?: boolean; kind: 'lesson' }
 export type ClipboardPage = { id: string; name: string; sourceLesson: string; items: BoardItem[]; background?: string; copiedAt: string }
 export type PageItems = Record<string, BoardItem[]>
 

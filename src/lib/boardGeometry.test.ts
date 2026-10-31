@@ -71,7 +71,6 @@ describe('getItemBounds', () => {
         const base = { id: 'x', left: 0, top: 0 }
         expect(getItemBounds({ ...base, type: 'grid', values: [] })).toMatchObject({ width: 294, height: 184 })
         expect(getItemBounds({ ...base, type: 'pdf', src: 's', label: 'l' })).toMatchObject({ width: 300, height: 220 })
-        expect(getItemBounds({ ...base, type: 'web', url: 'u', title: 't' })).toMatchObject({ width: 640, height: 400 })
         expect(getItemBounds({ ...base, type: 'image', src: 'unknown-src', label: 'l' })).toMatchObject({ width: 230, height: 180 })
     })
     it('uses the registered image aspect ratio', () => {

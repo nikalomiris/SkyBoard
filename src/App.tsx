@@ -2,27 +2,25 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
-    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight,
-    ArrowRight, Cast, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, ExternalLink, ZoomIn, ZoomOut, FileImage, FileText, Folder, FolderPlus, Gamepad2, Globe,
+    ArrowLeft, AudioLines, BookOpen, Brush, Check, ChevronDown, ChevronLeft, ChevronRight, Crosshair,
+    ArrowRight, Circle, ClipboardCopy, ClipboardPaste, Copy, Download, Eraser, FileImage, FileText, Folder, FolderPlus, Globe,
     Grid2X2, Highlighter, ImagePlus, LayoutGrid, List, LogOut, Minus, MoreHorizontal, MoveRight, Square, Triangle,
-    Maximize2, Minimize2, MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
+    MousePointer2, NotebookTabs, Pencil, Plus, Search, Settings2, Share2, Shapes, Sparkles,
     AlignLeft, AlignCenter, AlignRight, Crop, Layers, RotateCw, StickyNote, Tag, Trash2, Type, Undo2, Redo2, Users, UserX, X, Lock, Unlock
 } from 'lucide-react'
 import AuthScreen from './components/AuthScreen'
 import BlendingBoard from './components/BlendingBoard'
 import CardDeck, { DECK_ITEM_PREFIX, buildDeckPageItems, emptyDeckSession } from './components/CardDeck'
 import type { DeckSession } from './components/CardDeck'
+import MatchingGame from './components/MatchingGame'
+import { createMatchSession, emptyMatchSession, flipCard, advanceMatch, isMatchSession, maskMatchSession } from './lib/matchGame'
+import type { MatchPlayer, MatchSession } from './lib/matchGame'
 import type { BlendDraft, BlendStroke, BlendTile } from './components/BlendingBoard'
 import ImageCropDialog from './components/ImageCropDialog'
 import LessonThumbnail from './components/LessonThumbnail'
 import ProfileSettings from './components/ProfileSettings'
-import WebPageDialog from './components/WebPageDialog'
-import LiveVideo from './components/LiveVideo'
-import { GamePublisher, GameViewer, canShareGameFrame } from './lib/gameShare'
-import type { GameSignal } from './lib/gameShare'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, WEB_ITEM_SIZE, TEXT_LINE_HEIGHT } from './lib/boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, smoothPath, polylinesWithinDistance, resizeBoardItem, getImageSize, registerImageAspect, TEXT_LINE_HEIGHT, fitGridFontSize } from './lib/boardGeometry'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import { parseWebUrl, webHostname } from './lib/webEmbed'
 import { addLibraryBackground, backgroundImageMaxDimension, coverImageMaxDimension, downscaleImage, loadBackgroundLibrary, removeLibraryBackground, type LibraryBackground } from './lib/backgroundLibrary'
 import { createLessonInvite, deletePendingLessonInvite, endLessonShare, getActiveLessonShare, getSharedLesson, initializeWorkspace, listLessonInvites, listLiveLessonIds, loadLessonPages, loadWorkspace, saveWorkspace, setLessonInviteStatus, startLessonShare } from './lib/workspaceRepository'
 import type { LessonInvite, SharedInvite } from './lib/workspaceRepository'
@@ -30,7 +28,7 @@ import {
     defaultTextFont, folderNamesInitial, folderIsWithin, getFolderName, getFolderParent, getOrderedFolders,
     folderSeparator, id, initialLessons, MAX_GRID_SIZE, MIN_GRID_SIZE,
     mockFolderNames, mockLessonIds, notePalette, palette, readStudentFolders, readStudentLessons, readStored,
-    textFontOptions,
+    textFontOptions, dropRemovedItems,
 } from './lib/workspaceUtils'
 import type { Tool } from './lib/workspaceUtils'
 import type { ItemBounds, Point, ResizeHandle } from './lib/boardGeometry'
@@ -58,7 +56,7 @@ const toolList: { id: Tool; label: string; icon: typeof Pencil }[] = [
     { id: 'text', label: 'Text', icon: Type },
     { id: 'shape', label: 'Shapes', icon: Shapes },
     { id: 'grid', label: 'Word grid', icon: Grid2X2 },
-    { id: 'laser', label: 'Laser pointer', icon: Sparkles },
+    { id: 'laser', label: 'Laser pointer', icon: Crosshair },
 ]
 type LessonSortKey = 'edited-desc' | 'edited-asc' | 'name-asc' | 'name-desc'
 const sortLabels: Record<LessonSortKey, string> = { 'edited-desc': 'Last edited', 'edited-asc': 'Oldest edited', 'name-asc': 'Name (A–Z)', 'name-desc': 'Name (Z–A)' }
@@ -151,6 +149,8 @@ function App() {
         setShowBlend(false)
         setShowDeck(false)
         setDeckSession(emptyDeckSession)
+        setShowMatch(false)
+        resetMatchSession(emptyMatchSession)
         setPageSelectionMode(false)
         setSelectedPageIndices([])
     }, [openLesson?.id])
@@ -159,6 +159,28 @@ function App() {
     const [deckSession, setDeckSession] = useState<DeckSession>(emptyDeckSession)
     const [remoteDeckTile, setRemoteDeckTile] = useState<DeckTile | null>(null)
     const deckConfig = lessons.find((lesson) => lesson.id === openLesson?.id)?.cardDeck
+    // Matching game: the words are saved with the lesson; the board is transient and the teacher's browser is authoritative.
+    const [showMatch, setShowMatch] = useState(false)
+    const [matchSession, setMatchSession] = useState<MatchSession>(emptyMatchSession)
+    const matchSessionRef = useRef<MatchSession>(emptyMatchSession)
+    const matchConfig = lessons.find((lesson) => lesson.id === openLesson?.id)?.matchGame
+    function resetMatchSession(next: MatchSession) {
+        matchSessionRef.current = next
+        setMatchSession(next)
+    }
+    function playMatchCard(index: number, player: MatchPlayer) {
+        const next = flipCard(matchSessionRef.current, index, player)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }
+    function handleMatchCardClick(index: number) {
+        if (studentView) sendLive('match-flip', { index, inviteId: studentInviteRef.current?.id })
+        else playMatchCard(index, 0)
+    }
+    function advanceMatchTurn() {
+        const next = advanceMatch(matchSessionRef.current)
+        if (next !== matchSessionRef.current) resetMatchSession(next)
+    }
+    const [remoteMatch, setRemoteMatch] = useState<MatchSession>(emptyMatchSession)
     const [showShare, setShowShare] = useState(false)
     const [shareLinkUrl, setShareLinkUrl] = useState('')
     const [shareLinkLoading, setShareLinkLoading] = useState(false)
@@ -203,8 +225,6 @@ function App() {
     const [creatingLessonFolder, setCreatingLessonFolder] = useState(false)
     const [newLessonFolderName, setNewLessonFolderName] = useState('')
     const [showImageSearch, setShowImageSearch] = useState(false)
-    const [showWebDialog, setShowWebDialog] = useState(false)
-    const [playingWebId, setPlayingWebId] = useState<string | null>(null)
     const [imageQuery, setImageQuery] = useState('')
     const [imageUrl, setImageUrl] = useState('')
     const [cropQueue, setCropQueue] = useState<{ src: string; label: string; left: number; top: number; itemId?: string }[]>([])
@@ -270,6 +290,14 @@ function App() {
     const workspaceSaveTimeout = useRef<number | null>(null)
     const workspaceSaveDirty = useRef(false)
 
+    useEffect(() => {
+        if (!showBackgrounds) return
+        const closeOnOutsidePointer = (event: PointerEvent) => {
+            if (event.target instanceof Element && !event.target.closest('.background-panel, [aria-label="Set background"], .modal-scrim')) setShowBackgrounds(false)
+        }
+        document.addEventListener('pointerdown', closeOnOutsidePointer)
+        return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    }, [showBackgrounds])
     useLayoutEffect(() => {
         const button = document.querySelector<HTMLElement>(`.tool-rail [data-tool-id="${activeTool}"]`)
         const workspace = workspaceRef.current
@@ -366,7 +394,7 @@ function App() {
             const sharedItems: PageItems = {}
             const sharedBackgrounds: Record<string, string> = {}
             for (const page of shared.pages) {
-                sharedItems[`${lesson.id}:${page.position}`] = page.elements.filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
+                sharedItems[`${lesson.id}:${page.position}`] = dropRemovedItems(page.elements).filter((item) => !((item.type === 'image' || item.type === 'pdf') && item.src.startsWith('storage://')))
                 sharedBackgrounds[`${lesson.id}:${page.position}`] = page.background
             }
             setItemsByPage((previous) => ({ ...sharedItems, ...previous }))
@@ -406,6 +434,10 @@ function App() {
     const liveChannelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null)
     const liveSubscribedRef = useRef(false)
     const studentEditPendingRef = useRef(false)
+    // Last page content known to match the teacher; student edits are sent as a diff against it.
+    const studentBaseRef = useRef<{ pageIndex: number; items: BoardItem[] } | null>(null)
+    // Student edits the teacher has not echoed back yet; they are re-applied over incoming teacher snapshots.
+    const studentPendingRef = useRef<{ pageIndex: number; upserts: Map<string, { item: BoardItem; at: number }>; removed: Map<string, number> } | null>(null)
     type LiveDraft = { kind: 'ink' | 'eraser' | 'laser'; pageIndex: number; points: string; color: string; width: number; opacity: number }
     const [remoteDraft, setRemoteDraft] = useState<LiveDraft | null>(null)
     const handleRemoteDraft = ({ payload }: { payload: unknown }) => {
@@ -419,52 +451,12 @@ function App() {
     blendStateRef.current = { open: showBlend, tiles: blendTiles, strokes: blendStrokes, color: blendColor }
     const deckStateRef = useRef<{ open: boolean; tile: DeckTile | null }>({ open: false, tile: null })
     deckStateRef.current = { open: showDeck, tile: deckSession.order[deckSession.index] ?? null }
+    const matchStateRef = useRef({ open: false, session: emptyMatchSession })
+    matchStateRef.current = { open: showMatch, session: maskMatchSession(matchSession) }
     const studentLockedRef = useRef(studentLocked)
     studentLockedRef.current = studentLocked
     const lockedInviteIdsRef = useRef(lockedInviteIds)
     lockedInviteIdsRef.current = lockedInviteIds
-    type GameLive = { sharingId: string | null; expandedId: string | null }
-    const [sharingWebId, setSharingWebId] = useState<string | null>(null)
-    const [webExpandedId, setWebExpandedId] = useState<string | null>(null)
-    const [gameShareMessage, setGameShareMessage] = useState('')
-    const [gameLive, setGameLive] = useState<GameLive>({ sharingId: null, expandedId: null })
-    const [gameStream, setGameStream] = useState<MediaStream | null>(null)
-    const gamePublisherRef = useRef<GamePublisher | null>(null)
-    const gameStateRef = useRef<GameLive>({ sharingId: null, expandedId: null })
-    gameStateRef.current = { sharingId: sharingWebId, expandedId: webExpandedId }
-    const expandedWebId = studentView ? gameLive.expandedId : webExpandedId
-    const expandedActive = Boolean(expandedWebId && currentItems.some((item) => item.id === expandedWebId && item.type === 'web'))
-    const sendGameSignal = (signal: GameSignal) => {
-        const channel = liveChannelRef.current
-        if (channel && liveSubscribedRef.current) void channel.send({ type: 'broadcast', event: 'rtc', payload: signal })
-    }
-    const broadcastGameState = () => {
-        const channel = liveChannelRef.current
-        if (!channel || !liveSubscribedRef.current) return
-        void channel.send({ type: 'broadcast', event: 'game', payload: gameStateRef.current })
-    }
-    function stopGameShare() {
-        gamePublisherRef.current?.stop()
-        gamePublisherRef.current = null
-        setSharingWebId(null)
-    }
-    async function startGameShare(itemId: string) {
-        setGameShareMessage('')
-        const element = document.querySelector(`[data-web-viewport="${itemId}"]`)
-        if (!element) return
-        if (!canShareGameFrame()) { setGameShareMessage('Sharing with students needs Chrome or Edge on a computer.'); return }
-        gamePublisherRef.current?.stop()
-        const publisher = new GamePublisher(sendGameSignal, () => {
-            if (gamePublisherRef.current === publisher) { gamePublisherRef.current = null; setSharingWebId(null) }
-        })
-        try {
-            await publisher.start(element)
-            gamePublisherRef.current = publisher
-            setSharingWebId(itemId)
-        } catch {
-            setGameShareMessage('Sharing did not start. Choose "This tab" when your browser asks.')
-        }
-    }
     const broadcastLock = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
@@ -480,6 +472,11 @@ function App() {
         if (!channel || !liveSubscribedRef.current) return
         void channel.send({ type: 'broadcast', event: 'deck', payload: deckStateRef.current })
     }
+    const broadcastMatchState = () => {
+        const channel = liveChannelRef.current
+        if (!channel || !liveSubscribedRef.current) return
+        void channel.send({ type: 'broadcast', event: 'match', payload: matchStateRef.current })
+    }
     const broadcastBackground = () => {
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
@@ -494,8 +491,8 @@ function App() {
         void channel.send({ type: 'broadcast', event: 'state', payload: { ...live, background: live.background.length > inlineBackgroundLimit ? null : live.background } })
         broadcastBlendState()
         broadcastDeckState()
+        broadcastMatchState()
         broadcastLock()
-        broadcastGameState()
     }
 
     // Teacher: publish the current page (and its content) to every student on the shared link.
@@ -510,7 +507,12 @@ function App() {
             setOnlineInviteIds([...new Set(members.filter((member) => member.role === 'student' && member.inviteId).map((member) => member.inviteId as string))])
         })
         channel.on('broadcast', { event: 'draft' }, handleRemoteDraft)
-        channel.on('broadcast', { event: 'rtc' }, ({ payload }) => { void gamePublisherRef.current?.handle(payload as GameSignal) })
+        channel.on('broadcast', { event: 'match-flip' }, ({ payload }) => {
+            const flip = payload as { index?: number; inviteId?: string }
+            if (!matchStateRef.current.open || typeof flip?.index !== 'number') return
+            if (studentLockedRef.current || (flip.inviteId && lockedInviteIdsRef.current.includes(flip.inviteId))) return
+            playMatchCard(flip.index, 1)
+        })
         channel.on('broadcast', { event: 'cursor' }, ({ payload }) => {
             const cursor = payload as { inviteId: string; x: number; y: number; name: string; color: string; pageIndex: number }
             if (!cursor?.inviteId) return
@@ -523,11 +525,19 @@ function App() {
         })
         // Student edits arrive for the page the student was viewing; apply them to that page.
         channel.on('broadcast', { event: 'items' }, ({ payload }) => {
-            const edit = payload as { pageIndex: number; items: BoardItem[] }
+            const edit = payload as { pageIndex: number; upserts: BoardItem[]; removed: string[] }
             setRemoteDraft(null)
             const lessonId = openLessonIdRef.current
-            if (!lessonId || !edit || !Array.isArray(edit.items) || edit.pageIndex !== liveStateRef.current.pageIndex) return
-            setItemsByPage((previous) => ({ ...previous, [`${lessonId}:${edit.pageIndex}`]: edit.items }))
+            if (!lessonId || !edit || !Array.isArray(edit.upserts) || !Array.isArray(edit.removed) || edit.pageIndex !== liveStateRef.current.pageIndex) return
+            // Merge by item id so concurrent edits from different students all survive.
+            setItemsByPage((previous) => {
+                const key = `${lessonId}:${edit.pageIndex}`
+                const removed = new Set(edit.removed)
+                const upserts = new Map(edit.upserts.map((item) => [item.id, item]))
+                const existing = (previous[key] ?? []).filter((item) => !removed.has(item.id)).map((item) => upserts.get(item.id) ?? item)
+                const present = new Set(existing.map((item) => item.id))
+                return { ...previous, [key]: [...existing, ...edit.upserts.filter((item) => !present.has(item.id) && !removed.has(item.id))] }
+            })
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
@@ -558,17 +568,6 @@ function App() {
 
     useEffect(() => {
         if (!shareSessionId || studentView) return
-        broadcastGameState()
-    }, [shareSessionId, studentView, sharingWebId, webExpandedId])
-    useEffect(() => {
-        if (studentView) return
-        const exists = (itemId: string | null) => Boolean(itemId && currentItems.some((item) => item.id === itemId && item.type === 'web'))
-        if (sharingWebId && (!shareSessionId || !exists(sharingWebId))) stopGameShare()
-        if (webExpandedId && !exists(webExpandedId)) setWebExpandedId(null)
-    }, [studentView, shareSessionId, currentItems, sharingWebId, webExpandedId])
-    useEffect(() => () => gamePublisherRef.current?.stop(), [])
-    useEffect(() => {
-        if (!shareSessionId || studentView) return
         broadcastLock()
     }, [shareSessionId, studentView, studentLocked, lockedInviteIds])
     useEffect(() => {
@@ -579,6 +578,10 @@ function App() {
         if (!shareSessionId || studentView) return
         broadcastDeckState()
     }, [shareSessionId, studentView, showDeck, deckSession])
+    useEffect(() => {
+        if (!shareSessionId || studentView) return
+        broadcastMatchState()
+    }, [shareSessionId, studentView, showMatch, matchSession])
 
     // Both sides: stream the stroke being drawn so the other side sees it while it is written.
     const lastDraftSentRef = useRef(0)
@@ -608,7 +611,19 @@ function App() {
         studentEditPendingRef.current = false
         const channel = liveChannelRef.current
         if (!channel || !liveSubscribedRef.current) return
-        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, items: currentItems } })
+        const base = studentBaseRef.current?.pageIndex === pageIndex ? studentBaseRef.current.items : []
+        const baseById = new Map(base.map((item) => [item.id, item]))
+        const currentIds = new Set(currentItems.map((item) => item.id))
+        const upserts = currentItems.filter((item) => baseById.get(item.id) !== item && JSON.stringify(baseById.get(item.id)) !== JSON.stringify(item))
+        const removed = base.filter((item) => !currentIds.has(item.id)).map((item) => item.id)
+        studentBaseRef.current = { pageIndex, items: currentItems }
+        if (!upserts.length && !removed.length) return
+        const now = Date.now()
+        const pending = studentPendingRef.current?.pageIndex === pageIndex ? studentPendingRef.current : { pageIndex, upserts: new Map(), removed: new Map() }
+        for (const item of upserts) { pending.upserts.set(item.id, { item, at: now }); pending.removed.delete(item.id) }
+        for (const itemId of removed) { pending.removed.set(itemId, now); pending.upserts.delete(itemId) }
+        studentPendingRef.current = pending
+        void channel.send({ type: 'broadcast', event: 'items', payload: { pageIndex, upserts, removed } })
     }, [studentView, currentItems, pageIndex])
 
     // Student: follow the teacher's page and show its live content.
@@ -638,7 +653,22 @@ function App() {
             setPages(live.pages)
             setOpenLesson((previous) => previous ? { ...previous, pages: live.pages } : previous)
             setPageIndex(live.pageIndex)
-            setLiveLessonPage({ index: live.pageIndex, items: visible, background: live.background ?? undefined })
+            let merged = visible
+            const pending = studentPendingRef.current
+            if (pending && pending.pageIndex === live.pageIndex) {
+                const now = Date.now()
+                const byId = new Map(live.items.map((item) => [item.id, item]))
+                for (const [itemId, entry] of pending.upserts) {
+                    const echoed = byId.get(itemId)
+                    if ((echoed && JSON.stringify(echoed) === JSON.stringify(entry.item)) || now - entry.at > 5000) pending.upserts.delete(itemId)
+                }
+                for (const [itemId, at] of pending.removed) if (!byId.has(itemId) || now - at > 5000) pending.removed.delete(itemId)
+                merged = visible.filter((item) => !pending.removed.has(item.id)).map((item) => pending.upserts.get(item.id)?.item ?? item)
+                const present = new Set(merged.map((item) => item.id))
+                merged = [...merged, ...[...pending.upserts.values()].map((entry) => entry.item).filter((item) => !present.has(item.id))]
+            }
+            studentBaseRef.current = { pageIndex: live.pageIndex, items: merged }
+            setLiveLessonPage({ index: live.pageIndex, items: merged, background: live.background ?? undefined })
             setSelectedItemId(null)
         })
         channel.on('broadcast', { event: 'bg' }, ({ payload }) => {
@@ -672,26 +702,17 @@ function App() {
             setBlendColor(blend.color ?? null)
             setShowBlend(Boolean(blend.open))
         })
-        let viewer: GameViewer | null = null
-        const viewerId = crypto.randomUUID()
-        channel.on('broadcast', { event: 'rtc' }, ({ payload }) => { void viewer?.handle(payload as GameSignal) })
-        channel.on('broadcast', { event: 'game' }, ({ payload }) => {
-            if (!admitted()) return
-            const game = payload as GameLive
-            setGameLive({ sharingId: game?.sharingId ?? null, expandedId: game?.expandedId ?? null })
-            if (game?.sharingId && !viewer) {
-                viewer = new GameViewer(viewerId, sendGameSignal, setGameStream)
-                viewer.join()
-            } else if (!game?.sharingId && viewer) {
-                viewer.close()
-                viewer = null
-            }
-        })
         channel.on('broadcast', { event: 'deck' }, ({ payload }) => {
             if (!admitted()) return
             const deck = payload as { open?: boolean; tile?: DeckTile | null }
             setRemoteDeckTile(deck?.tile && typeof deck.tile.text === 'string' ? deck.tile : null)
             setShowDeck(Boolean(deck?.open))
+        })
+        channel.on('broadcast', { event: 'match' }, ({ payload }) => {
+            if (!admitted()) return
+            const match = payload as { open?: boolean; session?: unknown }
+            setRemoteMatch(isMatchSession(match?.session) ? match.session : emptyMatchSession)
+            setShowMatch(Boolean(match?.open))
         })
         channel.subscribe((status) => {
             liveSubscribedRef.current = status === 'SUBSCRIBED'
@@ -702,7 +723,6 @@ function App() {
         })
         return () => {
             window.clearTimeout(teacherAwayTimerRef.current)
-            viewer?.close()
             liveSubscribedRef.current = false
             liveChannelRef.current = null
             void client.removeChannel(channel)
@@ -1683,9 +1703,11 @@ function App() {
         if (activeTool !== 'select' || studentView) return
         setSelectedItemId(item.id)
         event.stopPropagation()
-        if (event.target instanceof HTMLInputElement || (event.target instanceof Element && event.target.closest('[data-web-control]'))) {
+        if (editingTextId && editingTextId !== item.id) endTextEditing()
+        if (event.target instanceof HTMLInputElement) {
             return
         }
+        event.preventDefault()
         const { stageX, stageY } = coordinates(event)
         itemGestureRef.current = { mode: 'move', item, startX: stageX, startY: stageY, bounds: getItemBounds(item) }
         stageRef.current?.setPointerCapture(event.pointerId)
@@ -1854,15 +1876,17 @@ function App() {
         }))
     }
 
+    function endTextEditing() {
+        // The input may have lost focus to the toolbar, so its blur never ended the edit.
+        const editedId = editingTextId
+        setEditingTextId(null)
+        if (editedId && currentItems.some((item) => item.id === editedId && item.type === 'text' && !item.text.trim())) updateCurrentItems((items) => items.filter((item) => item.id !== editedId))
+    }
+
     function onStageDown(event: ReactPointerEvent<HTMLElement>) {
         if (!stageRef.current) return
         const { stageX, stageY } = coordinates(event)
-        if (editingTextId) {
-            // The input may have lost focus to the toolbar, so its blur never ended the edit.
-            const editedId = editingTextId
-            setEditingTextId(null)
-            if (currentItems.some((item) => item.id === editedId && item.type === 'text' && !item.text.trim())) updateCurrentItems((items) => items.filter((item) => item.id !== editedId))
-        }
+        if (editingTextId) endTextEditing()
         if (activeTool === 'text' || activeTool === 'postit') return
         if (activeTool === 'element-eraser') {
             const hit = currentItems.find((item) => {
@@ -2280,47 +2304,6 @@ function App() {
         </div>
     }
 
-    function renderWebFrame(item: Extract<BoardItem, { type: 'web' }>): ReactNode {
-        const scale = item.scale ?? 1
-        const safeUrl = parseWebUrl(item.url)?.href
-        const playing = playingWebId === item.id && selectedItemId === item.id && activeTool === 'select'
-        const hostname = webHostname(item.url)
-        const zoom = Math.min(1, Math.max(0.3, item.zoom ?? 1))
-        const expanded = expandedActive && webExpandedId === item.id
-        const sharing = sharingWebId === item.id
-        const frame = expanded ? { x: 0, y: 0, width: 1000, height: 620 } : { x: item.left * 10, y: item.top * 6.2, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
-        const changeZoom = (direction: 1 | -1) => updateCurrentItems((items) => items.map((candidate) => candidate.id === item.id && candidate.type === 'web' ? { ...candidate, zoom: Math.min(1, Math.max(0.3, Math.round(((candidate.zoom ?? 1) + direction * 0.1) * 10) / 10)) } : candidate))
-        return <foreignObject {...frame}>
-            <div className={`board-web ${playing ? 'playing' : ''}`}>
-                <div className="board-web-bar">
-                    <Gamepad2 size={14} /><span title={item.url}>{item.title || hostname}</span>
-                    <button type="button" data-web-control className="web-zoom-button" title="Zoom out to see more of the page" aria-label="Zoom out" disabled={zoom <= 0.3} onClick={() => changeZoom(-1)}><ZoomOut size={14} /></button>
-                    <span className="web-zoom-label" aria-live="polite">{Math.round(zoom * 100)}%</span>
-                    <button type="button" data-web-control className="web-zoom-button" title="Zoom in" aria-label="Zoom in" disabled={zoom >= 1} onClick={() => changeZoom(1)}><ZoomIn size={14} /></button>
-                    {shareSessionId && <button type="button" data-web-control className={`web-zoom-button ${sharing ? 'sharing' : ''}`} aria-pressed={sharing} title={sharing ? 'Stop showing this page to students' : 'Show this page to students'} aria-label={sharing ? 'Stop showing to students' : 'Show to students'} onClick={() => { if (sharing) stopGameShare(); else void startGameShare(item.id) }}><Cast size={14} /></button>}
-                    <button type="button" data-web-control className="web-zoom-button" aria-pressed={expanded} title={expanded ? 'Back to normal size' : 'Fill the whole page'} aria-label={expanded ? 'Back to normal size' : 'Fill the whole page'} onClick={() => setWebExpandedId(expanded ? null : item.id)}>{expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>
-                    {safeUrl && <a data-web-control href={safeUrl} target="_blank" rel="noopener noreferrer" title="Open in new tab" aria-label="Open in new tab"><ExternalLink size={14} /></a>}
-                    <button type="button" data-web-control className={playing ? 'active' : ''} aria-pressed={playing} title={playing ? 'Stop interacting and move the page' : 'Interact with the page'} aria-label={playing ? 'Stop interacting' : 'Interact with the page'} onClick={() => { setSelectedItemId(item.id); setPlayingWebId(playing ? null : item.id) }}>{playing ? 'Done' : 'Play'}</button>
-                </div>
-                {safeUrl ? <><div className="board-web-viewport" data-web-viewport={item.id}><iframe title={item.title || hostname} src={safeUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock" referrerPolicy="no-referrer" loading="lazy" style={{ width: `${100 / zoom}%`, height: `${100 / zoom}%`, transform: `scale(${zoom})`, pointerEvents: playing ? 'auto' : 'none' }} /></div>{sharing && <div className="board-web-live" role="status">Showing to students</div>}{gameShareMessage && <div className="board-web-message" role="alert">{gameShareMessage}</div>}</> : <div className="board-web-placeholder"><strong>This web address is not valid.</strong></div>}
-            </div>
-        </foreignObject>
-    }
-
-    function renderStudentWeb(item: Extract<BoardItem, { type: 'web' }>): ReactNode {
-        const scale = item.scale ?? 1
-        const expanded = expandedActive && gameLive.expandedId === item.id
-        const frame = expanded ? { x: 0, y: 0, width: 1000, height: 620 } : { x: item.left * 10, y: item.top * 6.2, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
-        const title = item.title || webHostname(item.url)
-        const live = gameLive.sharingId === item.id
-        return <foreignObject {...frame}>
-            <div className="board-web">
-                <div className="board-web-bar"><Gamepad2 size={14} /><span>{title}</span>{live && gameStream && <span className="web-zoom-label">Live</span>}</div>
-                {live && gameStream ? <div className="board-web-viewport"><LiveVideo stream={gameStream} label={`${title}, shown by your teacher`} /></div> : <div className="board-web-placeholder"><Gamepad2 size={32} /><strong>{title}</strong><span>{live ? "Connecting to your teacher's screen…" : 'Your teacher will show this page during the lesson.'}</span></div>}
-            </div>
-        </foreignObject>
-    }
-
     function renderBoardItem(item: BoardItem, preview = false): ReactNode {
         const scale = item.scale ?? 1
         if (item.type === 'stroke') return <path d={smoothPath(item.points)} fill="none" stroke={item.color} strokeWidth={item.width} strokeOpacity={item.opacity} strokeLinecap="round" strokeLinejoin="round" />
@@ -2352,22 +2335,21 @@ function App() {
             const cols = item.cols ?? 3
             const rows = item.rows ?? 3
             const total = cols * rows
+            // Board-unit cell size minus the grid padding, gaps, borders and input padding.
+            const cellWidth = (294 * scale - 14 - 5 * (cols - 1)) / cols - 8
+            const cellHeight = (184 * scale - 14 - 5 * (rows - 1)) / rows - 2
             return (
                 <foreignObject x={item.left * 10} y={item.top * 6.2} width={294 * scale} height={184 * scale}>
                     <div className="board-grid" data-grid-id={item.id} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
                         {item.values.map((value, index) => {
                             const cellStyle = item.cellStyles?.[index]
-                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ textAlign: cellStyle?.align ?? 'center', color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${(cellStyle?.fontSize ?? item.fontSize ?? 20) * scale}px`, fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
+                            return <input key={index} data-grid-input={`${item.id}-${index}`} value={value} aria-label={`Grid cell ${index + 1}`} style={{ textAlign: cellStyle?.align ?? 'center', color: cellStyle?.color ?? item.color ?? '#405f51', fontSize: `${fitGridFontSize(value, (cellStyle?.fontSize ?? item.fontSize ?? 20) * scale, cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont, cellWidth, cellHeight)}px`, padding: '0 2px', fontFamily: cellStyle?.fontFamily ?? item.fontFamily ?? defaultTextFont }} onFocus={() => { setSelectedItemId(item.id); setActiveGridCell({ itemId: item.id, index }) }} onChange={(event) => setGridValue(item.id, index, event.target.value)} onKeyDown={(event) => handleGridEnter(event, index, item.id, cols, total)} />
                         })}
                     </div>
                 </foreignObject>
             )
         }
         if (item.type === 'image') return <foreignObject x={item.left * 10} y={item.top * 6.2} width={getImageSize(item.src).width * scale} height={getImageSize(item.src).height * scale}><img className="board-image" src={item.src || undefined} alt={item.label} draggable={false} onLoad={(event) => { if (registerImageAspect(item.src, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)) setImageSizeVersion((version) => version + 1) }} /></foreignObject>
-        if (item.type === 'web') {
-            const frame = { x: item.left * 10, y: item.top * 6.2, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
-            return <foreignObject {...frame}><div className="board-web board-web-placeholder"><Gamepad2 size={32} /><strong>{item.title || webHostname(item.url)}</strong>{studentView && <span>Your teacher will show this page during the lesson.</span>}</div></foreignObject>
-        }
         if (preview) return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></foreignObject>
         return <foreignObject x={item.left * 10} y={item.top * 6.2} width={300 * scale} height={220 * scale}><object className="board-pdf" data={item.src} type="application/pdf" aria-label={item.label}><div className="pdf-tile"><FileText size={28} /><span>{item.label}</span></div></object></foreignObject>
     }
@@ -2592,12 +2574,16 @@ function App() {
                                     })}</div>
                                 </div>}
                             </div> : <div />}
-                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="icon-button" title="Add a web page or game" aria-label="Add a web page or game" onClick={() => setShowWebDialog(true)}><Gamepad2 size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
+                            <div className="board-toolbar-right">{!studentView && <button className={`blend-button ${showBlend ? 'active' : ''}`} onClick={() => { setShowBlend(!showBlend); setShowDeck(false); setShowMatch(false) }}><AudioLines size={16} /> Blending board</button>}{!studentView && <button className={`blend-button ${showDeck ? 'active' : ''}`} aria-pressed={showDeck} onClick={() => { setShowDeck(!showDeck); setShowBlend(false); setShowMatch(false) }}><Layers size={16} /> Card deck</button>}{!studentView && <button className={`blend-button ${showMatch ? 'active' : ''}`} aria-pressed={showMatch} onClick={() => { setShowMatch(!showMatch); setShowBlend(false); setShowDeck(false) }}><LayoutGrid size={16} /> Matching game</button>}{!studentView && <><button className="icon-button" title="Add image or PDF" aria-label="Add image or PDF" onClick={() => imageInputRef.current?.click()}><ImagePlus size={18} /></button><button className="google-image-button" title="Search Google Images" aria-label="Search Google Images" onClick={() => setShowImageSearch(true)}><Globe size={16} /></button><input ref={imageInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={handleImage} /><button className="icon-button" aria-label="Undo" title="Undo" disabled={!canUndo} onClick={undo}><Undo2 size={18} /></button><button className="icon-button" aria-label="Redo" title="Redo" disabled={!canRedo} onClick={redo}><Redo2 size={18} /></button></>}</div>
                         </div>
                         <div className="canvas-workspace" ref={workspaceRef}>
                             {studentView && studentLocked && <div className="student-lock-overlay" role="status"><Lock size={16} /> Your teacher has paused interaction</div>}
                             {showBackgrounds && <div className="background-panel"><div className="panel-heading"><strong>Page background</strong><button onClick={() => setShowBackgrounds(false)} aria-label="Close background panel"><X size={16} /></button></div><div className="background-options"><button className={`background-swatch blank${background === '#fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('#fffef9')}><span />Blank</button><button className={`background-swatch lined${background === 'repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)' ? ' selected' : ''}`} onClick={() => setPageBackground('repeating-linear-gradient(to bottom, #fffef9 0 34px, #e5ece8 35px 36px)')}><span />Lined</button><button className={`background-swatch grid-bg${background === 'radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9' ? ' selected' : ''}`} onClick={() => setPageBackground('radial-gradient(#b9c5bf 1.2px, transparent 1.4px) 0 0 / 24px 24px, #fffef9')}><span />Grid</button></div><div className="panel-divider" /><span className="panel-small-label">PASTEL COLORS</span><div className="background-colors">{['#fdeef2', '#fff4da', '#eaf6e6', '#e3f1fb', '#f1ebfa', '#fce8e8'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><span className="panel-small-label">SOLID COLORS</span><div className="background-colors">{['#f4a6b8', '#f7c948', '#8fd19e', '#7fb8e6', '#b79ae0', '#d9dedb'].map((color) => <button key={color} className={background === color ? 'selected' : ''} aria-pressed={background === color} style={{ background: color }} onClick={() => setPageBackground(color)} aria-label={`Set ${color} background`} title={`Set ${color} background`}><Check size={14} /></button>)}</div><button className="upload-background" onClick={() => backgroundInputRef.current?.click()}><FileImage size={16} /> Upload image background</button><input ref={backgroundInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleBackgroundImage(event)} />{backgroundLibraryError && <p className="form-error" role="alert">{backgroundLibraryError}</p>}{backgroundLibrary.length > 0 && <div className="background-library"><span className="panel-small-label">YOUR BACKGROUNDS</span>{[...new Set(backgroundLibrary.map((entry) => entry.group))].sort((a, b) => (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b)).map((group) => <div key={group} className="background-library-group" role="group" aria-label={group || 'Ungrouped'}>{group && <span className="background-library-group-name">{group}</span>}<div className="background-library-grid">{backgroundLibrary.filter((entry) => entry.group === group).map((entry) => <div key={entry.id} className="background-library-item"><button type="button" title={`Use ${entry.name}`} aria-label={`Use ${entry.name} background`} style={{ backgroundImage: `url("${entry.image}")` }} onClick={() => { setBackgroundDraft({ src: entry.image, fit: 'fill', scope: backgroundScope, libraryId: entry.id, name: entry.name, group: entry.group, newGroup: '' }); setShowBackgrounds(false) }} /><button type="button" className="background-library-remove" title={`Remove ${entry.name} from library`} aria-label={`Remove ${entry.name} from library`} onClick={() => void deleteLibraryBackground(entry)}><X size={12} /></button></div>)}</div></div>)}</div>}<div className="panel-divider" /><span className="panel-small-label">APPLY TO</span><div className="background-scope"><button className={backgroundScope === 'current' ? 'active' : ''} onClick={() => setBackgroundScope('current')}>Current page</button><button className={backgroundScope === 'all' ? 'active' : ''} onClick={() => setBackgroundScope('all')}>All pages in lesson</button></div></div>}
                             {showDeck && <CardDeck readOnly={studentView} tile={remoteDeckTile} config={deckConfig} session={deckSession} onSessionChange={setDeckSession} onConfigChange={(cardDeck) => { if (cardDeck.ready) syncDeckPage(cardDeck.tiles); else if (!cardDeck.tiles.length) removeDeckPage(); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, cardDeck } : lesson)) }} onClose={() => setShowDeck(false)} />}
+                            {showMatch && <MatchingGame readOnly={studentView} locked={studentView && studentLocked} config={matchConfig} session={studentView ? remoteMatch : matchSession}
+                                onConfigChange={(matchGame) => { const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame } : lesson)) }}
+                                onStart={() => resetMatchSession(createMatchSession(matchConfig?.words ?? []))} onEdit={() => { resetMatchSession(emptyMatchSession); const lessonId = openLesson?.id; if (lessonId) setLessons((previous) => previous.map((lesson) => lesson.id === lessonId ? { ...lesson, matchGame: { words: lesson.matchGame?.words ?? [], ready: false } } : lesson)) }}
+                                onFlip={handleMatchCardClick} onAdvance={advanceMatchTurn} onClose={() => setShowMatch(false)} />}
                             {showBlend && <BlendingBoard tiles={blendTiles} setTiles={setBlendTiles} strokes={blendStrokes} setStrokes={setBlendStrokes} onDraft={(draft) => sendLive('draft', draft ? { ...draft, blend: true } : { blend: true, points: '' })} remoteDraft={remoteBlendDraft} onClose={() => setShowBlend(false)} readOnly={studentView} color={blendColor} onColorChange={studentView ? undefined : setBlendColor} />}
                             <div className="tool-options-stack" style={{ top: toolOptionsTop }}>
                                 {renderSelectedItemToolbar()}
@@ -2625,7 +2611,7 @@ function App() {
                             <div className="board-page-area">
                                 <div className="page-paper" ref={stageRef} style={{ background }} onClick={onStageClick} onPointerDown={onStageDown} onPointerMove={onStageMove} onPointerUp={onStageUp} onPointerCancel={onStageUp} onPointerLeave={() => setHoverVisible(false)} data-tool={activeTool} data-shape={activeTool === 'shape' ? selectedShape : undefined}>
                                     <svg className="drawing-layer" viewBox="0 0 1000 620" preserveAspectRatio="none" aria-label="Lesson whiteboard content">
-                                        {currentItems.map((item) => <g key={item.id} className="board-item" style={expandedActive && item.id !== expandedWebId ? { display: 'none' } : undefined} onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? (() => {
+                                        {currentItems.map((item) => <g key={item.id} className="board-item" onPointerDown={(event) => { if (item.type === 'text' && item.id === editingTextId) { event.stopPropagation(); return } if (activeTool === 'select' && !studentView && (item.type === 'text' || item.type === 'note')) { const last = lastItemTapRef.current; const now = Date.now(); if (last && last.id === item.id && now - last.time < 450) { lastItemTapRef.current = null; event.stopPropagation(); itemGestureRef.current = null; setSelectedItemId(item.id); if (item.type === 'text') window.setTimeout(() => setEditingTextId(item.id), 0); else setPostitDraft({ id: item.id, left: item.left, top: item.top, text: item.text }); return } lastItemTapRef.current = { id: item.id, time: now } } beginItemGesture(event, item) }}>{item.type === 'text' && item.id === editingTextId ? (() => {
                                             const b = getItemBounds(item); const ls = item.size * (item.scale ?? 1); const w = Math.max(220, b.width + 40); const a = item.align ?? 'center'; const x = a === 'left' ? b.left - 5 : a === 'right' ? b.left + b.width + 5 - w : b.left + b.width / 2 - w / 2; return <foreignObject x={x} y={b.top + ls * 0.15 - 3} width={w} height={item.text.split('\n').length * ls * TEXT_LINE_HEIGHT + 6}><textarea
                                                 className="board-text-input"
                                                 autoFocus
@@ -2641,8 +2627,8 @@ function App() {
                                                 }}
                                                 onKeyDown={(event) => { if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur() } }}
                                             /></foreignObject>
-                                        })() : item.type === 'web' ? (studentView ? renderStudentWeb(item) : renderWebFrame(item)) : renderBoardItem(item)}</g>)}
-                                        {selectedItem && !expandedActive && selectedItem.id !== editingTextId && (() => {
+                                        })() : renderBoardItem(item)}</g>)}
+                                        {selectedItem && selectedItem.id !== editingTextId && (() => {
                                             const bounds = getItemBounds(selectedItem)
                                             const centerX = bounds.left + bounds.width / 2
                                             return <g className="selection-frame">
@@ -2881,7 +2867,6 @@ function App() {
                 onCancel={() => setCropQueue([])}
                 onSkip={() => { const pending = cropQueue[0]; if (!pending.itemId) addBoardItem({ id: id(), type: 'image', left: pending.left, top: pending.top, src: pending.src, label: pending.label }); setCropQueue((queue) => queue.slice(1)) }}
                 onConfirm={(cropped) => { const pending = cropQueue[0]; if (pending.itemId) { updateCurrentItems((items) => items.map((candidate) => candidate.id === pending.itemId && candidate.type === 'image' ? { ...candidate, src: cropped, storagePath: undefined } : candidate)); setCropQueue((queue) => queue.slice(1)); return } const item: BoardItem = { id: id(), type: 'image', left: pending.left, top: pending.top, src: cropped, label: pending.label }; addBoardItem(item); setSelectedItemId(item.id); setActiveTool('select'); setShowToolOptions(false); setCropQueue((queue) => queue.slice(1)) }} />}
-            {showWebDialog && !studentView && <WebPageDialog onClose={() => setShowWebDialog(false)} onAdd={(url, title) => { const item: BoardItem = { id: id(), type: 'web', left: 18, top: 12, url, title }; addBoardItem(item); setPlayingWebId(null); setShowWebDialog(false) }} />}
             {showImageSearch && <div className="modal-scrim" onClick={() => setShowImageSearch(false)}><div className="share-modal image-search-modal" onClick={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowImageSearch(false)} aria-label="Close"><X size={18} /></button><div className="share-modal-icon"><Globe size={20} /></div><h2>Find a teaching image</h2><p>Search the web for pictures and click one to add it to your page.</p><form className="image-search-form" onSubmit={async (event) => { event.preventDefault(); const q = imageQuery.trim(); if (!q) return; setImageSearching(true); setImageSearchError(''); try { const response = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(`${q} filetype:bitmap`)}&gsrlimit=30&prop=imageinfo&iiprop=url|mime&iiurlwidth=240&format=json&origin=*`); if (!response.ok) throw new Error('search failed'); const data = await response.json(); const pages = Object.values(data.query?.pages ?? {}) as { pageid: number; index?: number; title: string; imageinfo?: { thumburl?: string; url: string; mime?: string }[] }[]; const results = pages.sort((x, y) => (x.index ?? 0) - (y.index ?? 0)).filter((page) => page.imageinfo?.[0] && /^image\/(jpeg|png|webp|gif)$/.test(page.imageinfo[0].mime ?? '')).map((page) => ({ id: String(page.pageid), thumb: page.imageinfo![0].thumburl || page.imageinfo![0].url, src: page.imageinfo![0].url, title: page.title.replace(/^File:/, '').replace(/\.[^.]+$/, '') })); setImageResults(results); if (!results.length) setImageSearchError('No pictures found. Try another word.') } catch { setImageResults([]); setImageSearchError('Could not search right now. Check your connection or paste an image address below.') } finally { setImageSearching(false) } }}><input value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="Try: ship, shell, short i" aria-label="Search images" autoFocus /><button type="submit" disabled={imageSearching}><Search size={15} /> {imageSearching ? 'Searching' : 'Search'}</button></form>{imageSearchError && <p className="image-search-error">{imageSearchError}</p>}{imageResults.length > 0 && <div className="image-results">{imageResults.map((result) => <button type="button" key={result.id} className="image-result" title={result.title} onClick={() => { setCropQueue((queue) => [...queue, { src: result.src, label: result.title, left: 14, top: 25 }]); setShowImageSearch(false) }}><img src={result.thumb} alt={result.title} loading="lazy" /></button>)}</div>}<label className="image-url-label">OR PASTE AN IMAGE ADDRESS<input value={imageUrl} onChange={(event) => setImageUrl(event.target.value)} placeholder="https://..." /></label><button type="button" className="insert-image-button" disabled={!imageUrl.trim()} onClick={() => { setCropQueue((queue) => [...queue, { src: imageUrl.trim(), label: 'Web image', left: 14, top: 25 }]); setImageUrl(''); setShowImageSearch(false) }}><ImagePlus size={15} /> Add image to page</button></div></div>}
         </div>
     )

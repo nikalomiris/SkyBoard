@@ -133,13 +133,11 @@ export function getItemBounds(item: BoardItem): ItemBounds {
         const size = getImageSize(item.src)
         return { left, top, width: size.width * scale, height: size.height * scale }
     }
-    if (item.type === 'web') return { left, top, width: WEB_ITEM_SIZE.width * scale, height: WEB_ITEM_SIZE.height * scale }
     const width = item.type === 'grid' ? 294 : item.type === 'note' ? 190 : item.type === 'pdf' ? 300 : 230
     const height = item.type === 'grid' ? 184 : item.type === 'note' ? 170 : item.type === 'pdf' ? 220 : 180
     return { left, top, width: width * scale, height: height * scale }
 }
 
-export const WEB_ITEM_SIZE = { width: 640, height: 400 }
 const IMAGE_BOX = { width: 230, height: 180 }
 const imageAspects = new Map<string, number>()
 
@@ -216,4 +214,19 @@ export function resizeBoardItem(item: BoardItem, factor: number, handle?: Resize
         }
     }
     return resizeAtFactor(boundedFactor)
+}
+
+let measureContext: CanvasRenderingContext2D | null | undefined
+
+// Largest font size (<= preferred) whose text fits the cell, measured in board units so it is identical on every screen.
+export function fitGridFontSize(text: string, preferred: number, fontFamily: string, cellWidth: number, cellHeight: number) {
+    const maxByHeight = cellHeight / 1.3
+    let size = Math.min(preferred, maxByHeight)
+    if (!text) return Math.max(size, 1)
+    if (measureContext === undefined) measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
+    if (!measureContext) return Math.max(size, 1)
+    measureContext.font = `600 100px ${fontFamily}`
+    const widthAt100 = measureContext.measureText(text).width
+    if (widthAt100 > 0) size = Math.min(size, (cellWidth / widthAt100) * 100)
+    return Math.max(size, 1)
 }
