@@ -1,4 +1,4 @@
-export type TutorialId = 'library' | 'board' | 'background' | 'share' | 'blending'
+export type TutorialId = 'library' | 'board' | 'background' | 'share' | 'blending' | 'deck' | 'match'
 
 export type TutorialStep = { selector: string, title: string, text: string }
 
@@ -21,6 +21,16 @@ export const tutorials: Record<TutorialId, TutorialStep[]> = {
     ],
     share: [
         { selector: '.invite-modal', title: 'Invite your students', text: 'Give each student a personal link. They follow the page you’re teaching on.' },
+    ],
+    deck: [
+        { selector: '.deck-prep-groups', title: 'Choose the tiles', text: 'Pick the sounds and letters to practise, then confirm the deck.' },
+        { selector: '.deck-split', title: 'Your deck', text: 'The selected tiles are on the left; the current card is shown on the right.' },
+        { selector: '.card-deck .deck-bar', title: 'Run the deck', text: 'Start to show cards one at a time, or unlock the deck to change the tiles.' },
+    ],
+    match: [
+        { selector: '.match-prep', title: 'Add your words', text: 'Type the words to practise. Each word becomes a pair of cards.' },
+        { selector: '.match-board', title: 'The board', text: 'Players take turns flipping cards to find matching pairs.' },
+        { selector: '.matching-game .deck-bar', title: 'Game controls', text: 'Start a new game, or unlock to change the words.' },
     ],
     blending: [
         { selector: '.blending-tabs', title: 'Sound categories', text: 'Switch between sets of letters, blends and word parts.' },

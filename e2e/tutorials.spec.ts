@@ -59,6 +59,30 @@ test.describe('interface tutorials', () => {
         await expect(page.getByRole('button', { name: 'Show tutorial' })).toHaveCount(2)
     })
 
+    test('card deck and matching game have their own tutorials', async ({ page }) => {
+        await signUp(page)
+        const tutorial = page.getByRole('dialog', { name: 'Tutorial' })
+        await tutorial.getByRole('button', { name: 'Skip' }).click()
+        await createLesson(page, 'Deck and match tutorials')
+        await tutorial.getByRole('button', { name: 'Skip' }).click()
+
+        await page.getByRole('button', { name: 'Card deck', exact: true }).click()
+        await expect(tutorial.getByText('Choose the tiles')).toBeVisible()
+        await tutorial.getByRole('button', { name: 'Skip' }).click()
+        await page.getByRole('button', { name: 'Close card deck' }).click()
+        await page.getByRole('button', { name: 'Card deck', exact: true }).click()
+        await expect(tutorial).toBeHidden()
+        await page.getByRole('dialog', { name: 'Card deck' }).getByRole('button', { name: 'Show tutorial' }).click()
+        await expect(tutorial.getByText('Choose the tiles')).toBeVisible()
+        await tutorial.getByRole('button', { name: 'Skip' }).click()
+        await page.getByRole('button', { name: 'Close card deck' }).click()
+
+        await page.getByRole('button', { name: 'Matching game', exact: true }).click()
+        await expect(tutorial.getByText('Add your words')).toBeVisible()
+        await tutorial.getByRole('button', { name: 'Skip' }).click()
+        await expect(page.getByRole('dialog', { name: 'Matching game' }).getByRole('button', { name: 'Show tutorial' })).toBeVisible()
+    })
+
     test('students never see tutorials or help buttons', async ({ browser }) => {
         const teacher = await newTeacher(browser)
         await signUp(teacher.page)

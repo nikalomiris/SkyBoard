@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, Lock, Play, Unlock, X } from 'lucide-react'
 import { advancedVowelGroups, affixRootGroups, closedExceptionTiles, digraphTiles, gluedSoundTiles, initialFinalBlendRows, letterTiles, silentETiles, silentLetterTiles } from './BlendingBoard'
 import type { BoardItem, CardDeckConfig, DeckTile } from '../lib/workspaceTypes'
@@ -73,7 +74,7 @@ function shuffle<T>(list: T[]) {
     return result
 }
 
-export default function CardDeck({ readOnly = false, config, onConfigChange, session = emptyDeckSession, onSessionChange, tile, onClose }: {
+export default function CardDeck({ readOnly = false, config, onConfigChange, session = emptyDeckSession, onSessionChange, tile, onClose, headerExtra }: {
     readOnly?: boolean
     config?: CardDeckConfig
     onConfigChange?: (config: CardDeckConfig) => void
@@ -81,6 +82,7 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
     onSessionChange?: (session: DeckSession) => void
     tile?: DeckTile | null
     onClose: () => void
+    headerExtra?: ReactNode
 }) {
     const [draft, setDraft] = useState<DeckTile[]>(() => config?.tiles ?? [])
     const ready = Boolean(config?.ready)
@@ -120,6 +122,7 @@ export default function CardDeck({ readOnly = false, config, onConfigChange, ses
         <header className="deck-header">
             <strong>Card Deck</strong>
             <span>{ready ? 'Lesson ready' : 'Preparing the deck'}</span>
+            {headerExtra}
             <button className="deck-close" title="Close" aria-label="Close card deck" onClick={onClose}><X size={16} /></button>
         </header>
         {ready ? <div className="deck-session">

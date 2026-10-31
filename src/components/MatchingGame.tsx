@@ -1,10 +1,11 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Lock, RotateCcw, SkipForward, Sparkles, Unlock, X } from 'lucide-react'
 import { MAX_MATCH_WORDS, MIN_MATCH_WORDS, hasPendingPair, isPendingMatch, isRoundOver, matchWinners, parseMatchWords } from '../lib/matchGame'
 import type { MatchSession } from '../lib/matchGame'
 import type { MatchGameConfig } from '../lib/workspaceTypes'
 
-export default function MatchingGame({ readOnly = false, myId, offline = [], config, onConfigChange, session, onStart, onEdit, onFlip, onAdvance, onSkip, onClose }: {
+export default function MatchingGame({ readOnly = false, myId, offline = [], config, onConfigChange, session, onStart, onEdit, onFlip, onAdvance, onSkip, onClose, headerExtra }: {
     readOnly?: boolean
     myId: string
     offline?: string[]
@@ -17,6 +18,7 @@ export default function MatchingGame({ readOnly = false, myId, offline = [], con
     onAdvance?: () => void
     onSkip?: () => void
     onClose: () => void
+    headerExtra?: ReactNode
 }) {
     const [text, setText] = useState(() => (config?.words ?? []).join('\n'))
     const [error, setError] = useState('')
@@ -88,6 +90,7 @@ export default function MatchingGame({ readOnly = false, myId, offline = [], con
         <header className="deck-header">
             <strong>Matching Game</strong>
             <span>{playing ? 'Game in progress' : ready ? 'Lesson ready' : 'Preparing the game'}</span>
+            {headerExtra}
             <button className="deck-close" title="Close" aria-label="Close matching game" onClick={onClose}><X size={16} /></button>
         </header>
         {playing ? <>
