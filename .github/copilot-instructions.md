@@ -9,7 +9,8 @@
 - `npm run build` type-checks and creates the production bundle in `dist/`.
 - `npm run preview` serves the production bundle.
 - `npx supabase db push` applies `supabase/migrations/` to the linked Supabase project.
-- There is no configured test runner, test script, or single-test command. Use the type-check/build commands for validation until tests are added.
+- `npm test` runs the Vitest unit tests (`src/**/*.test.ts`); `npx vitest run src/lib/liveSync.test.ts` runs a single file. `npm run test:e2e` runs Playwright against a local Supabase stack (requires Docker).
+- Teacher/student live sync logic (diffing, merging, pending-edit reconciliation) lives in `src/lib/liveSync.ts`; student edits are sent as `{ pageIndex, upserts, removed }` and merged by item id. Keep it covered by `liveSync.test.ts` and `e2e/collaboration.spec.ts`.
 
 ## Architecture
 

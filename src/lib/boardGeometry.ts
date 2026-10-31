@@ -216,14 +216,16 @@ export function resizeBoardItem(item: BoardItem, factor: number, handle?: Resize
     return resizeAtFactor(boundedFactor)
 }
 
-let measureContext: CanvasRenderingContext2D | null | undefined
+let measureCanvas: HTMLCanvasElement | undefined
 
 // Largest font size (<= preferred) whose text fits the cell, measured in board units so it is identical on every screen.
 export function fitGridFontSize(text: string, preferred: number, fontFamily: string, cellWidth: number, cellHeight: number) {
     const maxByHeight = cellHeight / 1.3
     let size = Math.min(preferred, maxByHeight)
     if (!text) return Math.max(size, 1)
-    if (measureContext === undefined) measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d')
+    if (typeof document === 'undefined') return Math.max(size, 1)
+    measureCanvas ??= document.createElement('canvas')
+    const measureContext = measureCanvas.getContext('2d')
     if (!measureContext) return Math.max(size, 1)
     measureContext.font = `600 100px ${fontFamily}`
     const widthAt100 = measureContext.measureText(text).width

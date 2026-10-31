@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, registerImageAspect, resizeBoardItem, rotatePoint, smoothPath, type Point } from './boardGeometry'
+import { getItemBounds, getLineEndpoints, moveBoardItem, parsePoints, pointToSegmentDistance, polylinesWithinDistance, registerImageAspect, resizeBoardItem, fitGridFontSize, rotatePoint, smoothPath, type Point } from './boardGeometry'
 import type { BoardItem } from './workspaceTypes'
 
 const note: BoardItem = { id: 'n', type: 'note', left: 10, top: 10, text: 'hi' }
@@ -136,5 +136,38 @@ describe('resizeBoardItem', () => {
         const stroke: BoardItem = { id: 's', type: 'stroke', points: '100,100 200,200', color: '#000', width: 1, opacity: 1 }
         const bounds = getItemBounds(resizeBoardItem(stroke, 0.5))
         expect(bounds).toMatchObject({ left: 100, top: 100, width: 50, height: 50 })
+    })
+})
+
+describe('fitGridFontSize', () => {
+    const withMeasure = (widthPerChar: number, run: () => void) => {
+        const original = HTMLCanvasElement.prototype.getContext
+        HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text: string) => ({ width: text.length * widthPerChar }) })) as unknown as typeof original
+        try { run() } finally { HTMLCanvasElement.prototype.getContext = original }
+    }
+
+    it('never exceeds the preferred size or the cell height', () => {
+        withMeasure(10, () => {
+            expect(fitGridFontSize('a', 20, 'sans-serif', 1000, 1000)).toBe(20)
+            expect(fitGridFontSize('a', 100, 'sans-serif', 1000, 26)).toBeCloseTo(20)
+        })
+    })
+    it('shrinks long text so its measured width fits the cell', () => {
+        withMeasure(60, () => {
+            // 10 chars at 60px per char per 100px font = 600 wide at 100px; a 60-wide cell allows 10px.
+            expect(fitGridFontSize('abcdefghij', 20, 'sans-serif', 60, 100)).toBeCloseTo(10)
+        })
+    })
+    it('is independent of screen size: same inputs give the same size', () => {
+        withMeasure(50, () => {
+            expect(fitGridFontSize('hello', 20, 'sans-serif', 80, 40)).toBe(fitGridFontSize('hello', 20, 'sans-serif', 80, 40))
+        })
+    })
+    it('falls back to the height-limited size for empty text or when measuring is unavailable', () => {
+        expect(fitGridFontSize('', 20, 'sans-serif', 50, 100)).toBe(20)
+        expect(fitGridFontSize('text', 20, 'sans-serif', 50, 13)).toBeCloseTo(10)
+    })
+    it('never returns less than 1', () => {
+        withMeasure(100, () => expect(fitGridFontSize('very long text', 20, 'sans-serif', 1, 1)).toBe(1))
     })
 })
