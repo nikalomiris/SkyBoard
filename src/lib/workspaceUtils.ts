@@ -87,3 +87,8 @@ export function readStudentLessons() {
         folder: legacyFolderNames[lesson.folder] ?? lesson.folder,
     }))
 }
+
+// Web-page items were removed from the product; lessons saved earlier may still contain them.
+export function dropRemovedItems<T extends { type: string }>(items: T[]) {
+    return items.filter((item) => item.type !== 'web')
+}

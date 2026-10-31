@@ -75,7 +75,7 @@ test.describe('lessons and board', () => {
         await expect(page.locator('.board-item')).toHaveCount(0)
     })
 
-    test('adds text, shapes, grids, and a web page to a lesson board', async ({ page }) => {
+    test('adds text, shapes, and grids to a lesson board', async ({ page }) => {
         await signUp(page)
         await createLesson(page, 'Board item types')
 
@@ -96,14 +96,6 @@ test.describe('lessons and board', () => {
         const gridPoint = await boardPoint(page, 0.3, 0.6)
         await page.mouse.click(gridPoint.x, gridPoint.y)
         await expect(page.locator('.board-item')).toHaveCount(3)
-
-        await page.getByRole('button', { name: 'Add a web page or game' }).click()
-        await page.getByRole('textbox', { name: 'Web address' }).fill('https://example.com')
-        await page.getByRole('button', { name: 'Check page' }).click()
-        await expect(page.locator('.web-check')).toBeVisible()
-        await page.getByRole('button', { name: /Add (it anyway|to page)/ }).click()
-        await expect(page.locator('.board-item')).toHaveCount(4)
-        await expect(page.getByText('example.com')).toBeVisible()
     })
 
     test('adds, crops, saves, and reloads each supported image extension', async ({ page }) => {

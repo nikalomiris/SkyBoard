@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { dropRemovedItems } from './workspaceUtils'
 import type { BoardItem, CardDeckConfig, Lesson, MatchGameConfig, WorkspaceData } from './workspaceTypes'
 
 const folderSeparator = ' / '
@@ -216,7 +217,7 @@ export async function loadWorkspace(ownerId: string): Promise<WorkspaceData> {
         lessons,
         itemsByPage,
         backgroundsByPage,
-        previewItemsByLesson: Object.fromEntries(resolvedPreviews.map((preview) => [preview.lesson_id, preview.elements])),
+        previewItemsByLesson: Object.fromEntries(resolvedPreviews.map((preview) => [preview.lesson_id, dropRemovedItems(preview.elements)])),
         previewBackgroundsByLesson: Object.fromEntries(resolvedPreviews.map((preview) => [preview.lesson_id, preview.background])),
         initialized: profileResult.data?.workspace_initialized ?? false,
         hasData: students.length > 0 || lessonRows.length > 0,
@@ -237,7 +238,7 @@ export async function loadLessonPages(ownerId: string, lessonId: string): Promis
     const loadedPages = new Map<string, { items: BoardItem[] | undefined; background: string }>()
     for (const page of rows) {
         const key = `${lessonId}:${page.position}`
-        const elements = await resolveAssetUrls(page.elements ?? [], assetUrlCache)
+        const elements = await resolveAssetUrls(dropRemovedItems(page.elements ?? []), assetUrlCache)
         if (elements.length) itemsByPage[key] = elements
         if (page.background) backgroundsByPage[key] = page.background
         loadedPages.set(key, { items: itemsByPage[key], background: backgroundsByPage[key] ?? defaultBackground })
